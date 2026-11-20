@@ -154,6 +154,7 @@
   let renderer, scene, camera;
   const originalParts = [];
   const shapes = {};
+  const pinHoleBottoms = [];
 
   function draw() {
     const angle = Number(rotation.value) * Math.PI / 180;
@@ -290,6 +291,12 @@
     for (const [part, variants] of Object.entries(shapes)) {
       for (const [style, mesh] of Object.entries(variants)) mesh.visible = styles[part] === style;
     }
+    // Đuôi ống dán keo giữa lưng nên lấp 2 lỗ chốt của đuôi gốc: kéo đáy lỗ ra bằng mặt lưng.
+    const base = originalParts[0].geometry;
+    const depth = styles.tail === 'original' ? -43.8 : -45.4;
+    for (const index of pinHoleBottoms) base.attributes.position.setZ(index, depth);
+    base.attributes.position.needsUpdate = true;
+    base.computeVertexNormals();
   }
 
   function applyStyles(styles) {
@@ -354,6 +361,9 @@
       for (let i = 0; i < order.length; i += 3) {
         const triangle = [0, 1, 2].map(k => new THREE.Vector3().fromBufferAttribute(position, order[i + k]).applyMatrix4(matrix));
         if (mirrored) triangle.reverse();
+        // Bỏ tam giác dẹt (vd. thành lỗ chốt đã lấp) để STL không có mặt diện tích 0.
+        const [a, b, c] = triangle;
+        if (new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c, a)).lengthSq() < 1e-10) continue;
         points.push(...triangle);
       }
     });
@@ -485,6 +495,13 @@
       palette.append(label);
       inputs.push(input);
     });
+
+    // Đáy 2 lỗ chốt Ø1.9 sâu 1.6 mm ở mặt lưng đế (tâm x 26.74, y 7.81 và 24.19).
+    const basePositions = originalParts[0].geometry.attributes.position;
+    for (let i = 0; i < basePositions.count; i++) {
+      const [x, y, z] = [basePositions.getX(i), basePositions.getY(i), basePositions.getZ(i)];
+      if (Math.abs(z + 43.8) < 0.05 && [7.81, 24.19].some(cy => Math.hypot(x - 26.74, y - cy) < 1.3)) pinHoleBottoms.push(i);
+    }
 
     const originalEars = new THREE.Group();
     originalEars.add(originalParts[3], originalParts[4]);

@@ -6,7 +6,7 @@ desktop.ini
 .idea/
 
 # Local Claude settings
-.claude/settings.local.json
+.claude/
 
 # Slicer / build leftovers
 *.gcode

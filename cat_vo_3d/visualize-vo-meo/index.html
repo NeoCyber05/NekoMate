@@ -2194,6 +2194,8 @@ html&gt;body{padding:0}&lt;/style&gt;
     const link = document.createElement(&#x27;a&#x27;);
     link.href = URL.createObjectURL(blob);
     link.download = name;
+    // index.html bắt mọi click vào &lt;a&gt; để mở link ngoài; chặn lan lên để trình duyệt tải file.
+    link.addEventListener(&#x27;click&#x27;, event =&gt; event.stopPropagation());
     document.body.append(link);
     link.click();
     link.remove();

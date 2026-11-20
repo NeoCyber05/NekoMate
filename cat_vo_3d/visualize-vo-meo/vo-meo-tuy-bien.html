@@ -303,6 +303,8 @@
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = name;
+    // index.html bắt mọi click vào <a> để mở link ngoài; chặn lan lên để trình duyệt tải file.
+    link.addEventListener('click', event => event.stopPropagation());
     document.body.append(link);
     link.click();
     link.remove();

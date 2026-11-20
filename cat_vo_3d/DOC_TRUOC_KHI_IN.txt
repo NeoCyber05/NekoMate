@@ -1,0 +1,30 @@
+3DIoT Builder · Mèo để bàn biết cảm xúc
+File in 3D cho vỏ sản phẩm
+
+LOẠI VỎ: vỏ vừa mạch, dựng theo board mở rộng 80×80 mm và các module, có kiểm tra va chạm.
+
+CÁC FILE (đơn vị mm, mỗi màu một file):
+  01_de_xam_dam.stl  ·  Đế  ·  màu: Xám đậm  ·  7.032 mặt lưới (tris)
+  02_dai_mau_hong.stl  ·  Dải màu  ·  màu: Hồng  ·  544 mặt lưới (tris)
+  03_nap_kem.stl  ·  Nắp  ·  màu: Kem  ·  9.200 mặt lưới (tris)
+  04_tai_kem.stl  ·  Tai  ·  màu: Kem  ·  1.568 mặt lưới (tris)
+  05_long_tai_hong.stl  ·  Lòng tai  ·  màu: Hồng  ·  16 mặt lưới (tris)
+  06_vien_man_hinh_den.stl  ·  Viền màn hình  ·  màu: Đen  ·  5.400 mặt lưới (tris)
+  07_chan_truoc_kem.stl  ·  Chân trước  ·  màu: Kem  ·  4.432 mặt lưới (tris)
+  08_duoi_san_ho.stl  ·  Đuôi  ·  màu: San hô  ·  2.678 mặt lưới (tris)
+
+CÁCH ĐẶT: mỗi file đã xoay sẵn theo hướng in và đặt sát mặt bàn. Nắp đã lật úp để mặt trên nằm xuống bàn; chi tiết trang trí nằm mặt dán xuống; nút bấm nằm mặt bích xuống.
+Ốc: 4 vít M3 dài 6 mm bắt board mở rộng vào 4 cột của đế, cột cách tâm 36 mm.
+
+LẮP RÁP:
+  1. Bắt board mở rộng (đã cắm DevKit) vào đế, cổng USB-C quay ra khe bên trái.
+  2. Lật úp nắp, trượt từng module vào rãnh trong nắp từ phía miệng nắp cho tới chặn. Lỏng thì chấm keo nến.
+  3. Nối dây theo tab Nối dây 3D, chừa dây đủ dài để mở nắp.
+  4. Chi tiết trang trí: cắt đoạn dây nhựa 1,75 mm dài 3 mm làm chốt, cắm vào lỗ Ø1,9 trên vỏ, chấm keo rồi ấn chi tiết vào.
+  5. Đậy nắp: gờ dưới nắp lồng vào đế, dải màu kẹp giữa.
+
+GỢI Ý IN: PLA hoặc PETG, lớp 0.2 mm, thành 3 lớp (wall), độ đầy (infill) 15–20%. Phần "nhựa mờ" in bằng nhựa trong hoặc trắng mờ.
+Xem trước trong phần mềm cắt lớp slicer (Bambu Studio, PrusaSlicer, Cura) và bật support khi có phần nhô.
+
+LƯU Ý DUNG SAI: Kích thước vỏ dựng theo bo 80×80 mm tiêu chuẩn. Tùy theo lô bo mạch và độ co nhựa máy in của bạn, hãy đo linh kiện thực tế và in thử đế trước khi in toàn bộ vỏ.
+Đo linh kiện thực tế và in thử đế trước khi in trọn bộ.

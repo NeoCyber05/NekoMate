@@ -1,0 +1,13 @@
+﻿# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Local Claude settings
+.claude/settings.local.json
+
+# Slicer / build leftovers
+*.gcode
+*.3mf.bak

@@ -11,3 +11,14 @@ desktop.ini
 # Slicer / build leftovers
 *.gcode
 *.3mf.bak
+
+# NekoMate runtime, secrets & build artifacts
+cat_firmware/cat/secrets.h
+cat_firmware/sim/build/
+server/node_modules/
+server/.env
+server/data/
+server/mosquitto/passwd
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "author": "NekoMate",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-s3-devkitc-1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-ili9341",
+      "id": "tft",
+      "top": -40,
+      "left": 240,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "touch_btn",
+      "top": 220,
+      "left": -140,
+      "attrs": {
+        "color": "yellow",
+        "label": "TTP223 Touch"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_pd",
+      "top": 280,
+      "left": -140,
+      "attrs": {
+        "value": "10000"
+      }
+    }
+  ],
+  "connections": [
+    ["esp:TX", "$serialMonitor:RX", "", []],
+    ["esp:RX", "$serialMonitor:TX", "", []],
+    ["tft:VCC", "esp:3V3", "red", ["v0"]],
+    ["tft:GND", "esp:GND.1", "black", ["v0"]],
+    ["tft:SCK", "esp:12", "green", ["v0"]],
+    ["tft:MOSI", "esp:11", "blue", ["v0"]],
+    ["tft:CS", "esp:10", "orange", ["v0"]],
+    ["tft:D/C", "esp:14", "purple", ["v0"]],
+    ["tft:RST", "esp:21", "gray", ["v0"]],
+    ["tft:LED", "esp:3V3", "red", ["v0"]],
+    ["touch_btn:1.l", "esp:3V3", "red", ["h-20"]],
+    ["touch_btn:2.l", "esp:4", "gold", ["h-10"]],
+    ["r_pd:1", "esp:4", "gold", ["h0"]],
+    ["r_pd:2", "esp:GND.1", "black", ["h0"]]
+  ],
+  "dependencies": {}
+}

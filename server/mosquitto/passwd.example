@@ -1,0 +1,4 @@
+# Sao chép thành server/mosquitto/passwd hoặc tạo bằng mosquitto_passwd -c -b server/mosquitto/passwd nekomate-server <password>
+# và thêm thiết bị bằng: mosquitto_passwd -b server/mosquitto/passwd nekomate-01 <device-password>
+nekomate-server:replace-with-mosquitto-passwd-hash
+nekomate-01:replace-with-mosquitto-passwd-hash

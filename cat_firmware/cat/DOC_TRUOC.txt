@@ -37,7 +37,7 @@ NekoMate · Đồng hồ để bàn thông minh (ESP32-S3)
   - SPK+ / SPK- -> nối trực tiếp hai dây loa 8 Ohm / 3 W (ngõ ra cầu vi sai, không nối GND)
   Lưu ý trước khi cấp điện: kiểm tra đúng nhãn board thật là MAX98357A (I2S chuẩn) hay MAX98357B (left-justified) và cấu hình chân nguồn/SD trên board mở rộng.
 
-4. Lệnh biên dịch, nạp và mô phỏng
+4. Lệnh biên dịch, nạp và khởi chạy
 - Biên dịch bản phần cứng thật (ST7789 + I2S + ESP-MQTT):
   arduino-cli compile --fqbn esp32:esp32:esp32s3 cat_firmware/cat
 - Nạp qua cổng UART (thay COMx bằng cổng thật):
@@ -51,3 +51,31 @@ NekoMate · Đồng hồ để bàn thông minh (ESP32-S3)
   - sim:notify <Notification JSON>
   - sim:wifi off | sim:wifi on
   - sim:advance <giây>
+- Khởi chạy backend & broker thử nghiệm:
+  1) Tạo mật khẩu băm trong server/: npm run hash-password -- "<mat-khau>"
+  2) Sao chép server/.env.example thành server/.env và điền OWNER_PASSWORD_HASH, MQTT_PASSWORD, COMPOSIO_API_KEY
+  3) Tạo tài khoản Mosquitto tại server/mosquitto/passwd (theo server/mosquitto/passwd.example), bật Docker Desktop và chạy:
+     docker compose -f server/compose.yaml up -d mqtt
+  4) Khởi chạy server: cd server && npm start (mặc định http://127.0.0.1:3000)
+
+5. Kết quả mô phỏng & kiểm thử tự động
+- Biên dịch firmware ESP32-S3 thật: ĐẠT (1.175.220 byte flash / 89%, 54.144 byte RAM / 16%).
+- Biên dịch bản Wokwi NEKOMATE_SIM=1 (cat_firmware/sim/build/cat.ino.bin & .elf): ĐẠT (1.140.508 byte flash / 87%, 54.032 byte RAM / 16%).
+- Kiểm tra kiểu TypeScript backend (cd server && npm run typecheck): ĐẠT (0 lỗi).
+- Kiểm thử tự động backend (cd server && npm test): ĐẠT 8/8 bài kiểm thử (auth, device retry/stale/title, Google Calendar & Todoist, Outlook/To Do/TickTick/Google Tasks, HTTP/dashboard/polling).
+- Ghi chú chạy thủ công trên Wokwi + Docker Mosquitto (chưa chạy live trong môi trường không có Docker daemon/wokwi-cli):
+  - Mở cat_firmware/sim/ trong Wokwi (VS Code Wokwi extension hoặc Wokwi web) để kiểm tra tương tác nút nhấn TTP223 qua lúc chớp mắt, kịch bản sim:time/sim:alarm/sim:wifi off/sim:advance, sim:notify khi báo thức đang reo, và ngắt/nối broker thử nghiệm.
+
+6. Kết quả thử tài khoản & hướng dẫn chạy Composio thật
+- Đã kiểm thử qua fixture ẩn danh cho toàn bộ 6 nguồn: Google Calendar (nhắc trước 10 phút, lịch lặp dời/hủy, cả ngày), Todoist (có giờ có/không múi giờ, chỉ ngày, hoàn thành), Outlook Calendar, Microsoft To Do (bật/tắt reminderDateTime, chọn danh sách, nâng cấp quyền Outlook an toàn giữ Calendar khi hủy), TickTick (có giờ và isAllDay), Google Tasks (giữ dateOnly và notifyAt=null).
+- Khi gắn COMPOSIO_API_KEY thật:
+  1) Đặt COMPOSIO_API_KEY trong server/.env.
+  2) Kết nối từng nguồn từ web Dashboard (/api/sources/:id/connect) và thực hiện một lần đọc thật để đối chiếu schema thực tế từ connected account.
+  3) Chỉ thêm ID nguồn vào NEKOMATE_VERIFIED_SOURCES sau khi xác minh đọc thành công trên tài khoản thật.
+
+7. Checklist nghiệm thu mạch thật (trước khi cố định vào vỏ 3D)
+- [ ] Xác minh trực quan module khuếch đại là MAX98357A (I2S chuẩn) hay MAX98357B, kiểm tra chân SD/GAIN và đường 5V trên board mở rộng.
+- [ ] Kiểm tra thông mạch, không chạm chập giữa 5V / 3V3 / GND trước khi cấp nguồn.
+- [ ] Nạp firmware bản phần cứng thật, thử chạm TTP223 để kiểm tra màn hình ST7789 và mẫu tiếng Meow ở mức âm lượng thấp (hiện firmware đặt ~20% biên độ).
+- [ ] Thử phát tiếng Alarm/Reminder trong khi Wi-Fi, MQTT và màn hình ST7789 hoạt động đồng thời; xác nhận loa phát sạch, không rè và ESP32-S3 không bị brownout/reset.
+- [ ] Đo kích thước lắp đặt thực tế của ESP32-S3, board mở rộng, màn hình ST7789, cảm biến TTP223, MAX98357A và loa 8 Ohm / 3 W bên trong vỏ 3D (index.html / cat_vo_3d) trước khi cố định.

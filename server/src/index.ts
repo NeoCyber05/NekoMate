@@ -18,6 +18,7 @@ import {
   validateSession,
   verifyPassword,
 } from './auth.ts';
+import { formatLocalDateTime } from './adapters/time.ts';
 import { openDatabase } from './db.ts';
 import { DeviceService, type MqttTransport } from './device.ts';
 import {
@@ -33,6 +34,7 @@ export interface AppDependencies {
   appBaseUrl: string;
   ownerPasswordHash: string;
   deviceId?: string;
+  timezone?: string;
   nowSec?: () => number;
 }
 
@@ -41,8 +43,10 @@ export function createApp(deps: AppDependencies): express.Express {
   const limiter = new LoginRateLimiter();
   const nowSec = deps.nowSec ?? (() => Math.floor(Date.now() / 1000));
   const deviceId = deps.deviceId ?? 'nekomate-01';
+  const timezone = deps.timezone ?? 'Asia/Ho_Chi_Minh';
 
   app.use(express.json({ limit: '64kb' }));
+  app.use(express.static(path.resolve(import.meta.dirname, '../public')));
 
   const checkOrigin = (req: Request, res: Response, next: NextFunction): void => {
     if (!isAllowedOrigin(req.get('origin'), deps.appBaseUrl)) {
@@ -141,6 +145,73 @@ export function createApp(deps: AppDependencies): express.Express {
     );
     await deps.deviceService.tickDevice(currentSec);
     res.json({ notificationId, title, notifyAt: currentSec, expiresAt: currentSec + 300 });
+  });
+
+  app.get('/api/reminders', requireAuth, (_req: Request, res: Response) => {
+    const sourceNames = new Map<string, string>();
+    if (deps.sourcesService) {
+      for (const s of deps.sourcesService.listSources()) {
+        sourceNames.set(s.id, s.name);
+      }
+    }
+
+    const timedRows = deps.db
+      .prepare(
+        `SELECT notification_id, source, source_id, title, notify_at, expires_at, status
+         FROM notification_queue
+         WHERE status != 'cancelled'
+         ORDER BY notify_at ASC`,
+      )
+      .all() as Array<{
+      notification_id: string;
+      source: string;
+      source_id: string | null;
+      title: string;
+      notify_at: number;
+      expires_at: number;
+      status: string;
+    }>;
+
+    const dateOnlyRows = deps.db
+      .prepare(
+        `SELECT source_id, external_id, title, date_only
+         FROM source_items
+         WHERE notify_at IS NULL AND date_only IS NOT NULL
+         ORDER BY date_only ASC, title ASC`,
+      )
+      .all() as Array<{
+      source_id: string;
+      external_id: string;
+      title: string;
+      date_only: string;
+    }>;
+
+    const reminders = [
+      ...timedRows.map((row) => ({
+        id: row.notification_id,
+        sourceId: row.source_id,
+        source: row.source,
+        title: row.title,
+        notifyAt: row.notify_at,
+        expiresAt: row.expires_at,
+        localTime: formatLocalDateTime(row.notify_at, timezone),
+        dateOnly: null,
+        status: row.status,
+      })),
+      ...dateOnlyRows.map((row) => ({
+        id: `${row.source_id}:${row.external_id}`,
+        sourceId: row.source_id,
+        source: sourceNames.get(row.source_id) ?? row.source_id,
+        title: row.title,
+        notifyAt: null,
+        expiresAt: null,
+        localTime: null,
+        dateOnly: row.date_only,
+        status: 'date_only',
+      })),
+    ];
+
+    res.json({ timezone, reminders });
   });
 
   if (deps.sourcesService) {
@@ -342,6 +413,7 @@ function startServer(): void {
     appBaseUrl,
     ownerPasswordHash,
     deviceId,
+    timezone,
   });
 
   setInterval(() => {

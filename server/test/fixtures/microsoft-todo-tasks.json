@@ -1,0 +1,42 @@
+{
+  "value": [
+    {
+      "id": "ms-todo-1",
+      "title": "Gửi hợp đồng",
+      "status": "notStarted",
+      "isReminderOn": true,
+      "reminderDateTime": {
+        "dateTime": "2026-11-23T15:15:00.0000000",
+        "timeZone": "Asia/Bangkok"
+      },
+      "dueDateTime": {
+        "dateTime": "2026-11-23T16:00:00.0000000",
+        "timeZone": "Asia/Bangkok"
+      }
+    },
+    {
+      "id": "ms-todo-noreminder",
+      "title": "Việc tắt nhắc",
+      "status": "notStarted",
+      "isReminderOn": false,
+      "reminderDateTime": {
+        "dateTime": "2026-11-23T17:00:00.0000000",
+        "timeZone": "UTC"
+      },
+      "dueDateTime": {
+        "dateTime": "2026-11-24T00:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    },
+    {
+      "id": "ms-todo-done",
+      "title": "Việc hoàn thành",
+      "status": "completed",
+      "isReminderOn": true,
+      "reminderDateTime": {
+        "dateTime": "2026-11-23T11:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    }
+  ]
+}

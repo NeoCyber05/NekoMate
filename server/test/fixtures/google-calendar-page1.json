@@ -1,0 +1,22 @@
+{
+  "items": [
+    {
+      "id": "evt-1",
+      "status": "confirmed",
+      "summary": "Họp nhóm 🐱",
+      "start": {
+        "dateTime": "2026-11-23T09:00:00+07:00"
+      }
+    },
+    {
+      "id": "evt-rec_20261124T020000Z",
+      "recurringEventId": "evt-rec",
+      "status": "confirmed",
+      "summary": "Đồng bộ sáng",
+      "start": {
+        "dateTime": "2026-11-24T09:00:00+07:00"
+      }
+    }
+  ],
+  "nextPageToken": "gcal-page-2"
+}

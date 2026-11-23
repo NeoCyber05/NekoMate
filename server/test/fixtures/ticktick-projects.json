@@ -1,0 +1,6 @@
+{
+  "projects": [
+    { "id": "proj-work", "name": "Dự án A" },
+    { "id": "proj-home", "name": "Cá nhân" }
+  ]
+}

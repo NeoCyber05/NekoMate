@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "id": "gtask-1",
+      "title": "Gia hạn tên miền",
+      "status": "needsAction",
+      "due": "2026-11-24T00:00:00.000Z"
+    },
+    {
+      "id": "gtask-done",
+      "title": "Việc đã xong",
+      "status": "completed",
+      "due": "2026-11-23T00:00:00.000Z"
+    }
+  ]
+}

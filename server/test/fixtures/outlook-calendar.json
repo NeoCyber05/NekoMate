@@ -1,0 +1,35 @@
+{
+  "value": [
+    {
+      "id": "ol-evt-rec-1",
+      "subject": "Họp tuần Outlook",
+      "isCancelled": false,
+      "isAllDay": false,
+      "type": "occurrence",
+      "start": {
+        "dateTime": "2026-11-23T10:30:00.0000000",
+        "timeZone": "SE Asia Standard Time"
+      }
+    },
+    {
+      "id": "ol-evt-allday",
+      "subject": "Sự kiện cả ngày Outlook",
+      "isCancelled": false,
+      "isAllDay": true,
+      "start": {
+        "dateTime": "2026-11-25T00:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    },
+    {
+      "id": "ol-evt-cancelled",
+      "subject": "Đã hủy",
+      "isCancelled": true,
+      "isAllDay": false,
+      "start": {
+        "dateTime": "2026-11-23T12:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    }
+  ]
+}

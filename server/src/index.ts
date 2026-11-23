@@ -20,10 +20,16 @@ import {
 } from './auth.ts';
 import { openDatabase } from './db.ts';
 import { DeviceService, type MqttTransport } from './device.ts';
+import {
+  SourceHttpError,
+  SourcesService,
+  createSdkComposioGateway,
+} from './sources.ts';
 
 export interface AppDependencies {
   db: DatabaseSync;
   deviceService: DeviceService;
+  sourcesService?: SourcesService;
   appBaseUrl: string;
   ownerPasswordHash: string;
   deviceId?: string;
@@ -92,7 +98,7 @@ export function createApp(deps: AppDependencies): express.Express {
     res.json({ authenticated: true });
   });
 
-  app.post('/api/auth/logout', checkOrigin, requireAuth, (req: Request, res: Response) => {
+  app.post('/api/auth/logout', checkOrigin, requireAuth, (_req: Request, res: Response) => {
     const token = res.locals['sessionToken'] as string | undefined;
     if (token) {
       revokeSession(deps.db, token);
@@ -137,6 +143,113 @@ export function createApp(deps: AppDependencies): express.Express {
     res.json({ notificationId, title, notifyAt: currentSec, expiresAt: currentSec + 300 });
   });
 
+  if (deps.sourcesService) {
+    const sourcesSvc = deps.sourcesService;
+
+    app.get('/api/sources', requireAuth, (_req: Request, res: Response) => {
+      res.json({ sources: sourcesSvc.listSources() });
+    });
+
+    app.post('/api/sources/:id/connect', checkOrigin, requireAuth, async (req: Request, res: Response) => {
+      try {
+        const sourceId = String(req.params['id'] ?? '');
+        const sessionTokenHash = res.locals['sessionTokenHash'] as string;
+        const result = await sourcesSvc.startConnect(
+          sourceId,
+          sessionTokenHash,
+          deps.appBaseUrl,
+          nowSec(),
+        );
+        res.json(result);
+      } catch (err) {
+        if (err instanceof SourceHttpError) {
+          res.status(err.status).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Lỗi tạo liên kết nguồn' });
+      }
+    });
+
+    app.get('/api/sources/oauth/callback', requireAuth, async (req: Request, res: Response) => {
+      try {
+        const nonce = typeof req.query['nonce'] === 'string' ? req.query['nonce'] : '';
+        const connectedAccountId =
+          typeof req.query['connectedAccountId'] === 'string'
+            ? req.query['connectedAccountId']
+            : typeof req.query['connected_account_id'] === 'string'
+              ? req.query['connected_account_id']
+              : '';
+        const sessionTokenHash = res.locals['sessionTokenHash'] as string;
+        const result = await sourcesSvc.completeOAuthCallback({
+          nonce,
+          connectedAccountId,
+          sessionTokenHash,
+          nowSec: nowSec(),
+        });
+
+        const accept = req.get('accept') ?? '';
+        if (accept.includes('text/html')) {
+          res.status(200).type('html').send(
+            '<!doctype html><html lang="vi"><meta charset="utf-8"><title>NekoMate</title>' +
+            '<p>Đã liên kết thành công. Đang quay lại NekoMate...</p>' +
+            '<script>location.replace("/");</script></html>',
+          );
+          return;
+        }
+        res.json(result);
+      } catch (err) {
+        if (err instanceof SourceHttpError) {
+          res.status(err.status).json({ error: err.message });
+          return;
+        }
+        res.status(500).json({ error: err instanceof Error ? err.message : 'Lỗi xác nhận OAuth' });
+      }
+    });
+
+    app.post('/api/sources/:id/sync', checkOrigin, requireAuth, async (req: Request, res: Response) => {
+      try {
+        const sourceId = String(req.params['id'] ?? '');
+        await sourcesSvc.syncSource(sourceId, nowSec());
+        res.json({ sources: sourcesSvc.listSources() });
+      } catch (err) {
+        if (err instanceof SourceHttpError) {
+          res.status(err.status).json({ error: err.message });
+          return;
+        }
+        res.status(502).json({ error: err instanceof Error ? err.message : 'Đồng bộ nguồn thất bại' });
+      }
+    });
+
+    app.get('/api/sources/:id/options', requireAuth, async (req: Request, res: Response) => {
+      try {
+        const sourceId = String(req.params['id'] ?? '');
+        const options = await sourcesSvc.listOptions(sourceId);
+        res.json({ options });
+      } catch (err) {
+        if (err instanceof SourceHttpError) {
+          res.status(err.status).json({ error: err.message });
+          return;
+        }
+        res.status(502).json({ error: err instanceof Error ? err.message : 'Không lấy được danh sách từ nguồn' });
+      }
+    });
+
+    app.put('/api/sources/:id/scope', checkOrigin, requireAuth, async (req: Request, res: Response) => {
+      try {
+        const sourceId = String(req.params['id'] ?? '');
+        const scopeId = typeof req.body?.scopeId === 'string' ? req.body.scopeId : '';
+        await sourcesSvc.updateScope(sourceId, scopeId, nowSec());
+        res.json({ sources: sourcesSvc.listSources() });
+      } catch (err) {
+        if (err instanceof SourceHttpError) {
+          res.status(err.status).json({ error: err.message });
+          return;
+        }
+        res.status(502).json({ error: err instanceof Error ? err.message : 'Không cập nhật được phạm vi nguồn' });
+      }
+    });
+  }
+
   return app;
 }
 
@@ -147,7 +260,17 @@ function startServer(): void {
   const ownerPasswordHash = process.env['OWNER_PASSWORD_HASH'] || '';
   const dbPath = path.resolve(process.env['DB_PATH'] || './data/nekomate.db');
   const deviceId = process.env['DEVICE_ID'] || 'nekomate-01';
+  const timezone = process.env['TIMEZONE'] || 'Asia/Ho_Chi_Minh';
   const mqttUrl = process.env['MQTT_URL'] || 'mqtt://127.0.0.1:1883';
+  const composioApiKey = process.env['COMPOSIO_API_KEY'] || '';
+  const composioUserId = process.env['COMPOSIO_USER_ID'] || 'nekomate-owner';
+  const verifiedEnv = process.env['NEKOMATE_VERIFIED_SOURCES'] || 'google_calendar,todoist';
+  const verifiedSources = new Set(
+    verifiedEnv
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
 
   if (!ownerPasswordHash) {
     console.error('Thiếu OWNER_PASSWORD_HASH trong môi trường.');
@@ -180,6 +303,15 @@ function startServer(): void {
   };
 
   const deviceService = new DeviceService({ db, deviceId, mqtt: mqttTransport });
+  const gateway = composioApiKey ? createSdkComposioGateway(composioApiKey) : null;
+  const sourcesService = new SourcesService({
+    db,
+    deviceId,
+    gateway,
+    composioUserId,
+    timezone,
+    verifiedSources,
+  });
 
   mqttClient.on('connect', () => {
     mqttClient.subscribe(
@@ -206,6 +338,7 @@ function startServer(): void {
   const app = createApp({
     db,
     deviceService,
+    sourcesService,
     appBaseUrl,
     ownerPasswordHash,
     deviceId,
@@ -216,6 +349,12 @@ function startServer(): void {
       console.error('Lỗi tick thiết bị:', err);
     });
   }, 5000);
+
+  setInterval(() => {
+    void sourcesService.syncAllConnected(Math.floor(Date.now() / 1000)).catch((err) => {
+      console.error('Lỗi đồng bộ nguồn định kỳ:', err);
+    });
+  }, 5 * 60 * 1000);
 
   app.listen(port, host, () => {
     console.log(`NekoMate server đang chạy tại http://${host}:${port}`);

@@ -1,0 +1,25 @@
+{
+  "tasks": [
+    {
+      "id": "tt-timed",
+      "title": "Review PR TickTick",
+      "status": 0,
+      "isAllDay": false,
+      "dueDate": "2026-11-23T08:45:00.000+0000"
+    },
+    {
+      "id": "tt-allday",
+      "title": "Dọn bàn làm việc",
+      "status": 0,
+      "isAllDay": true,
+      "dueDate": "2026-11-24T00:00:00.000+0700"
+    },
+    {
+      "id": "tt-done",
+      "title": "Đã hoàn tất",
+      "status": 2,
+      "isAllDay": false,
+      "dueDate": "2026-11-23T10:00:00.000+0000"
+    }
+  ]
+}

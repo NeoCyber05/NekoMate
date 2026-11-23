@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "evt-rec_20261125T020000Z",
+      "recurringEventId": "evt-rec",
+      "status": "cancelled",
+      "summary": "Đồng bộ sáng",
+      "start": {
+        "dateTime": "2026-11-25T09:00:00+07:00"
+      }
+    },
+    {
+      "id": "evt-allday",
+      "status": "confirmed",
+      "summary": "Ngày hội NekoMate",
+      "start": {
+        "date": "2026-11-26"
+      }
+    }
+  ]
+}

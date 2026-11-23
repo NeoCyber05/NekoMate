@@ -3,14 +3,20 @@ NekoMate · Đồng hồ để bàn thông minh (ESP32-S3)
 1. Toolchain và thư viện đã khóa
 - Arduino CLI: 1.6.0
 - Core ESP32: esp32:esp32@4.0.0 (đã kiểm tra compile/link thành công ESP_I2S.h và <mqtt_client.h> / esp_mqtt_client_init; tương thích API Arduino-ESP32 3.x+)
-  Lưu ý: URL board manager dùng https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  Lưu ý URL board manager: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  Nếu Windows dùng OneDrive có thư mục tiếng Việt (Tài liệu), chuyển thư mục user về đường dẫn ASCII:
+  arduino-cli config set directories.user C:\Users\<TenUser>\Arduino
 - Thư viện Arduino:
   - Adafruit GFX Library (1.13.0) + Adafruit BusIO (1.17.4)
   - Adafruit ST7735 and ST7789 Library (1.12.0)
   - Adafruit ILI9341 (1.7.0, dùng cho bản mô phỏng Wokwi NEKOMATE_SIM)
   - ArduinoJson (7.4.3)
 
-2. Sơ đồ chân phần cứng (ESP32-S3-DevKitC-1)
+2. Cấu hình Wi-Fi và MQTT trước khi nạp
+- Sao chép cat_firmware/cat/secrets.h.example thành cat_firmware/cat/secrets.h và điền WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, MQTT_USE_TLS, MQTT_USER, MQTT_PASS, DEVICE_ID, MQTT_CA_CERT (nếu dùng TLS).
+- Không commit secrets.h lên Git.
+
+3. Sơ đồ chân phần cứng (ESP32-S3-DevKitC-1)
 - Cảm biến chạm TTP223:
   - SIG -> GPIO4 (mức HIGH khi chạm)
   - VCC -> 3.3V, GND -> GND
@@ -31,11 +37,17 @@ NekoMate · Đồng hồ để bàn thông minh (ESP32-S3)
   - SPK+ / SPK- -> nối trực tiếp hai dây loa 8 Ohm / 3 W (ngõ ra cầu vi sai, không nối GND)
   Lưu ý trước khi cấp điện: kiểm tra đúng nhãn board thật là MAX98357A (I2S chuẩn) hay MAX98357B (left-justified) và cấu hình chân nguồn/SD trên board mở rộng.
 
-3. Lệnh biên dịch và nạp firmware
-- Biên dịch bản phần cứng thật (ST7789 + I2S):
+4. Lệnh biên dịch, nạp và mô phỏng
+- Biên dịch bản phần cứng thật (ST7789 + I2S + ESP-MQTT):
   arduino-cli compile --fqbn esp32:esp32:esp32s3 cat_firmware/cat
-- Nạp qua cổng UART (thay COMx bằng cổng thật trên Windows):
+- Nạp qua cổng UART (thay COMx bằng cổng thật):
   arduino-cli upload --fqbn esp32:esp32:esp32s3 --port COMx cat_firmware/cat
-- Biên dịch bản mô phỏng Wokwi (ILI9341 + Serial audio markers):
-  arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-property "compiler.cpp.extra_flags=-DNEKOMATE_SIM=1" cat_firmware/cat
-- Serial Monitor: 115200 baud.
+- Biên dịch bản mô phỏng Wokwi (ILI9341 + Serial audio/MQTT markers):
+  arduino-cli compile --fqbn esp32:esp32:esp32s3 --build-property "compiler.cpp.extra_flags=-DNEKOMATE_SIM=1" --output-dir cat_firmware/sim/build cat_firmware/cat
+- Serial Monitor: 115200 baud. Các lệnh mô phỏng hỗ trợ:
+  - sim:touch
+  - sim:time 2026-11-23T06:59:55+07:00 | sim:time invalid
+  - sim:alarm <AlarmConfig JSON>
+  - sim:notify <Notification JSON>
+  - sim:wifi off | sim:wifi on
+  - sim:advance <giây>

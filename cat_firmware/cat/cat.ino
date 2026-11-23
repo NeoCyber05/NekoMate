@@ -4,6 +4,7 @@
              module khuếch đại I2S MAX98357A + loa 8 Ohm / 3 W.
 */
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 
 #include "alarm.h"
 #include "audio.h"
+#include "device_mqtt.h"
 
 namespace {
 
@@ -38,7 +40,9 @@ constexpr uint32_t HAPPY_DURATION_MS = 4000;
 constexpr uint32_t BLINK_INTERVAL_MS = 4000;
 constexpr uint32_t BLINK_DURATION_MS = 140;
 constexpr uint32_t ALARM_MAX_DURATION_MS = 90000;
+constexpr uint32_t REMINDER_MAX_DURATION_MS = 30000;
 constexpr int64_t VALID_EPOCH_THRESHOLD = 1700000000LL;
+constexpr size_t DEDUP_CAPACITY = 32;
 
 #ifdef NEKOMATE_SIM
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
@@ -54,8 +58,24 @@ enum class Mood : uint8_t {
 
 enum class ScreenPage : uint8_t {
   FACE = 0,
-  ALARM_ALERT = 1
+  ALARM_ALERT = 1,
+  REMINDER_ALERT = 2
 };
+
+enum class DedupState : uint8_t {
+  None = 0,
+  Shown = 1,
+  Dismissed = 2
+};
+
+struct DedupEntry {
+  char notificationId[64];
+  DedupState state;
+  int64_t at;
+};
+
+DedupEntry dedupTable[DEDUP_CAPACITY] = {};
+size_t dedupWriteIdx = 0;
 
 ScreenPage currentPage = ScreenPage::FACE;
 bool screenInitialized = false;
@@ -83,12 +103,17 @@ bool alarmPlayingActive = false;
 uint32_t alarmStartedRealMs = 0;
 uint32_t alarmElapsedSimMs = 0;
 
+bool reminderPlayingActive = false;
+char activeReminderId[64] = "";
+int64_t activeReminderAt = 0;
+uint32_t reminderStartedRealMs = 0;
+uint32_t reminderElapsedSimMs = 0;
+
 #ifdef NEKOMATE_SIM
 bool simClockValid = false;
 int64_t simEpochSec = 0;
-bool simWifiOn = true;
 bool simUseStepClock = false;
-char simLineBuf[384];
+char simLineBuf[512];
 size_t simLineLen = 0;
 
 int64_t daysFromCivil(int y, unsigned m, unsigned d) {
@@ -119,7 +144,6 @@ bool parseFourDigits(const char *s, int &val) {
 }
 
 bool parseIsoTimestamp(const char *iso, int64_t &epochOut) {
-  // Ho tro YYYY-MM-DDTHH:MM:SS[Z|+HH:MM|-HH:MM]
   if (iso == nullptr || strlen(iso) < 19) {
     return false;
   }
@@ -136,7 +160,7 @@ bool parseIsoTimestamp(const char *iso, int64_t &epochOut) {
     return false;
   }
 
-  int32_t offsetSec = 7 * 3600;  // Mac dinh ICT-7 neu khong ghi offset
+  int32_t offsetSec = 7 * 3600;
   const char *tz = iso + 19;
   if (tz[0] == 'Z' || tz[0] == 'z') {
     offsetSec = 0;
@@ -187,18 +211,70 @@ bool readClock(struct tm &localOut, bool &clockValidOut, int64_t &epochOut) {
 #endif
 }
 
+int findDedupIndex(const char *notificationId) {
+  for (size_t i = 0; i < DEDUP_CAPACITY; i++) {
+    if (dedupTable[i].state != DedupState::None &&
+        strcmp(dedupTable[i].notificationId, notificationId) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+void upsertDedup(const char *notificationId, DedupState state, int64_t atEpoch) {
+  const int existing = findDedupIndex(notificationId);
+  if (existing >= 0) {
+    dedupTable[existing].state = state;
+    dedupTable[existing].at = atEpoch;
+    return;
+  }
+  DedupEntry &slot = dedupTable[dedupWriteIdx];
+  memset(&slot, 0, sizeof(slot));
+  strncpy(slot.notificationId, notificationId, sizeof(slot.notificationId) - 1);
+  slot.state = state;
+  slot.at = atEpoch;
+  dedupWriteIdx = (dedupWriteIdx + 1) % DEDUP_CAPACITY;
+}
+
+void emitNotificationEvent(const char *type, const char *notificationId, int64_t atEpoch) {
+  JsonDocument doc;
+  doc["type"] = type;
+  doc["notificationId"] = notificationId;
+  doc["at"] = atEpoch;
+  char buf[220];
+  serializeJson(doc, buf, sizeof(buf));
+  mqttEnqueueEvent(buf);
+}
+
+void emitAlarmConfigEvent(ApplyAlarmResult res, const AlarmConfig &incoming) {
+  if (res == ApplyAlarmResult::Invalid) {
+    return;
+  }
+  JsonDocument doc;
+  if (res == ApplyAlarmResult::Stale) {
+    doc["type"] = "alarm_config_stale";
+    doc["configId"] = incoming.configId;
+    doc["revision"] = incoming.revision;
+    doc["appliedRevision"] = alarmCurrent().revision;
+  } else {
+    doc["type"] = "alarm_config_applied";
+    doc["configId"] = incoming.configId;
+    doc["revision"] = incoming.revision;
+  }
+  char buf[220];
+  serializeJson(doc, buf, sizeof(buf));
+  mqttEnqueueEvent(buf);
+}
+
 void drawFaceStatic() {
   tft.fillScreen(BG);
-  // Tai mèo
   tft.fillTriangle(30, 70, 70, 20, 95, 70, FUR);
   tft.fillTriangle(210, 70, 170, 20, 145, 70, FUR);
   tft.fillTriangle(48, 64, 70, 34, 84, 64, PINK);
   tft.fillTriangle(192, 64, 170, 34, 156, 64, PINK);
-  // Mũi và miệng
   tft.fillTriangle(110, 150, 130, 150, 120, 160, PINK);
   tft.drawLine(120, 160, 108, 172, FUR);
   tft.drawLine(120, 160, 132, 172, FUR);
-  // Ria mép
   for (int i = 0; i < 2; i++) {
     tft.drawLine(20, 150 + i * 12, 85, 156 + i * 6, FUR);
     tft.drawLine(220, 150 + i * 12, 155, 156 + i * 6, FUR);
@@ -294,6 +370,64 @@ void drawAlarmAlertPage(int hour, int minute, bool clockValid) {
   tft.print(F("Cham de tat"));
 }
 
+void drawWrappedText(const char *text, int startX, int startY, int maxCols, int lineHeight, int maxLines) {
+  char line[24];
+  const size_t total = strlen(text);
+  size_t pos = 0;
+  int lineIdx = 0;
+
+  while (pos < total && lineIdx < maxLines) {
+    while (pos < total && text[pos] == ' ') {
+      pos++;
+    }
+    if (pos >= total) {
+      break;
+    }
+
+    size_t take = 0;
+    size_t lastSpace = 0;
+    const size_t limit = static_cast<size_t>(maxCols < 22 ? maxCols : 22);
+    while (pos + take < total && take < limit) {
+      if (text[pos + take] == ' ') {
+        lastSpace = take;
+      }
+      take++;
+    }
+    if (pos + take < total && lastSpace > 0) {
+      take = lastSpace;
+    }
+    memcpy(line, text + pos, take);
+    line[take] = '\0';
+    tft.setCursor(startX, startY + lineIdx * lineHeight);
+    tft.print(line);
+    pos += take;
+    lineIdx++;
+  }
+}
+
+void drawReminderAlertPage(const char *source, const char *title) {
+  tft.fillScreen(BG);
+  tft.drawRoundRect(12, 16, 216, 208, 16, ACCENT);
+  tft.setTextSize(2);
+  tft.setTextColor(ACCENT);
+  tft.setCursor(24, 32);
+  char srcBuf[20];
+  strncpy(srcBuf, source, sizeof(srcBuf) - 1);
+  srcBuf[sizeof(srcBuf) - 1] = '\0';
+  tft.print(srcBuf);
+
+  tft.drawFastHLine(24, 58, 192, ACCENT);
+
+  tft.setTextSize(2);
+  tft.setTextColor(FUR);
+  drawWrappedText(title, 24, 74, 16, 24, 4);
+
+  tft.setTextSize(2);
+  tft.setTextColor(PINK);
+  tft.setCursor(44, 188);
+  tft.print(F("Cham de tat"));
+}
+
 void enterFacePage(int hour, int minute, bool clockValid) {
   currentPage = ScreenPage::FACE;
   screenInitialized = true;
@@ -320,8 +454,30 @@ void stopAlarmPlayback(int hour, int minute, bool clockValid) {
   enterFacePage(hour, minute, clockValid);
 }
 
+void stopReminderPlayback(bool byTouch, int hour, int minute, bool clockValid, int64_t nowEpoch, bool hasClock) {
+  if (!reminderPlayingActive) {
+    return;
+  }
+  reminderPlayingActive = false;
+  reminderElapsedSimMs = 0;
+  audioStop();
+  if (byTouch && activeReminderId[0] != '\0') {
+    const int64_t atEpoch = hasClock ? nowEpoch : activeReminderAt;
+    upsertDedup(activeReminderId, DedupState::Dismissed, atEpoch);
+    emitNotificationEvent("dismissed", activeReminderId, atEpoch);
+  }
+  activeReminderId[0] = '\0';
+  enterFacePage(hour, minute, clockValid);
+}
+
 void evaluateAlarmTick(uint32_t nowMs, const struct tm &localTm, bool clockValid) {
   if (alarmDue(localTm, clockValid)) {
+    // Bao thuc uu tien cao nhat: chiem loa va man hinh ngay lap tuc
+    if (reminderPlayingActive) {
+      reminderPlayingActive = false;
+      reminderElapsedSimMs = 0;
+      activeReminderId[0] = '\0';
+    }
     alarmPlayingActive = true;
     alarmStartedRealMs = nowMs;
     alarmElapsedSimMs = 0;
@@ -329,6 +485,79 @@ void evaluateAlarmTick(uint32_t nowMs, const struct tm &localTm, bool clockValid
     drawAlarmAlertPage(localTm.tm_hour, localTm.tm_min, clockValid);
     audioStart(SoundKind::Alarm);
   }
+}
+
+void handleAlarmConfigPayload(const char *json) {
+  AlarmConfig incoming = {};
+  if (!parseAlarmConfigJson(json, incoming)) {
+    return;
+  }
+  const ApplyAlarmResult res = applyAlarmConfig(incoming);
+  emitAlarmConfigEvent(res, incoming);
+}
+
+void handleNotifyPayload(const char *json, uint32_t nowMs) {
+  if (json == nullptr) {
+    return;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) {
+    return;
+  }
+  if (!doc["notificationId"].is<const char *>() ||
+      !doc["source"].is<const char *>() ||
+      !doc["title"].is<const char *>() ||
+      !doc["expiresAt"].is<int64_t>()) {
+    return;
+  }
+
+  const char *notificationId = doc["notificationId"];
+  const char *source = doc["source"];
+  const char *title = doc["title"];
+  const int64_t notifyAt = doc["notifyAt"].is<int64_t>() ? doc["notifyAt"].as<int64_t>() : 0;
+  const int64_t expiresAt = doc["expiresAt"].as<int64_t>();
+
+  if (notificationId == nullptr || notificationId[0] == '\0' || strlen(notificationId) >= sizeof(activeReminderId)) {
+    return;
+  }
+
+  // 1. Kiem tra trung trong RAM truoc: gui lai trang thai gan nhat va giu loa im
+  const int dedupIdx = findDedupIndex(notificationId);
+  if (dedupIdx >= 0) {
+    const char *type = (dedupTable[dedupIdx].state == DedupState::Dismissed) ? "dismissed" : "shown";
+    emitNotificationEvent(type, notificationId, dedupTable[dedupIdx].at);
+    return;
+  }
+
+  // 2. Kiem tra han lenh
+  struct tm localTm = {};
+  bool clockValid = false;
+  int64_t nowEpoch = 0;
+  readClock(localTm, clockValid, nowEpoch);
+  if (clockValid && nowEpoch >= expiresAt) {
+    return;
+  }
+
+  // 3. Neu dang ban (bao thuc hoac nhac khac), giu im va KHONG ghi chong trung
+  if (alarmPlayingActive || reminderPlayingActive) {
+    return;
+  }
+
+  // 4. Hien thi va phat tieng
+  const int64_t atEpoch = clockValid ? nowEpoch : notifyAt;
+  upsertDedup(notificationId, DedupState::Shown, atEpoch);
+
+  reminderPlayingActive = true;
+  strncpy(activeReminderId, notificationId, sizeof(activeReminderId) - 1);
+  activeReminderId[sizeof(activeReminderId) - 1] = '\0';
+  activeReminderAt = atEpoch;
+  reminderStartedRealMs = nowMs;
+  reminderElapsedSimMs = 0;
+
+  currentPage = ScreenPage::REMINDER_ALERT;
+  drawReminderAlertPage(source != nullptr ? source : "NekoMate", title != nullptr ? title : "Loi nhac");
+  audioStart(SoundKind::Reminder);
+  emitNotificationEvent("shown", notificationId, atEpoch);
 }
 
 void handleTouchPress(uint32_t nowMs) {
@@ -339,6 +568,18 @@ void handleTouchPress(uint32_t nowMs) {
 
   if (alarmPlayingActive) {
     stopAlarmPlayback(clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid);
+    lastTouchActionMs = nowMs;
+    return;
+  }
+  if (reminderPlayingActive) {
+    stopReminderPlayback(
+      true,
+      clockValid ? localTm.tm_hour : -1,
+      clockValid ? localTm.tm_min : -1,
+      clockValid,
+      epochSec,
+      clockValid
+    );
     lastTouchActionMs = nowMs;
     return;
   }
@@ -384,6 +625,8 @@ void processSimCommand(const char *cmd, uint32_t nowMs) {
     readClock(localTm, clockValid, epochSec);
     if (alarmPlayingActive) {
       stopAlarmPlayback(clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid);
+    } else if (reminderPlayingActive) {
+      stopReminderPlayback(false, clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid, epochSec, clockValid);
     } else {
       audioStop();
     }
@@ -407,12 +650,12 @@ void processSimCommand(const char *cmd, uint32_t nowMs) {
     return;
   }
   if (strcmp(cmd, "sim:wifi off") == 0) {
-    simWifiOn = false;
+    mqttSetSimulatedWifi(false);
     Serial.println(F("sim:wifi off"));
     return;
   }
   if (strcmp(cmd, "sim:wifi on") == 0) {
-    simWifiOn = true;
+    mqttSetSimulatedWifi(true);
     Serial.println(F("sim:wifi on"));
     return;
   }
@@ -425,6 +668,11 @@ void processSimCommand(const char *cmd, uint32_t nowMs) {
     const ApplyAlarmResult res = applyAlarmConfig(incoming);
     Serial.print(F("alarm:"));
     Serial.println(applyAlarmResultName(res));
+    emitAlarmConfigEvent(res, incoming);
+    return;
+  }
+  if (strncmp(cmd, "sim:notify ", 11) == 0) {
+    handleNotifyPayload(cmd + 11, nowMs);
     return;
   }
   if (strncmp(cmd, "sim:advance ", 12) == 0) {
@@ -445,6 +693,16 @@ void processSimCommand(const char *cmd, uint32_t nowMs) {
           int64_t epochSec = 0;
           readClock(localTm, clockValid, epochSec);
           stopAlarmPlayback(clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid);
+        }
+      }
+      if (reminderPlayingActive) {
+        reminderElapsedSimMs += 1000UL;
+        if (reminderElapsedSimMs >= REMINDER_MAX_DURATION_MS) {
+          struct tm localTm = {};
+          bool clockValid = false;
+          int64_t epochSec = 0;
+          readClock(localTm, clockValid, epochSec);
+          stopReminderPlayback(false, clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid, epochSec, clockValid);
         }
       }
       audioSimAdvanceMs(1000UL);
@@ -502,6 +760,7 @@ void setup() {
 
   alarmInit();
   audioBegin();
+  mqttStart();
 
   const uint32_t nowMs = millis();
   lastTouchActionMs = nowMs;
@@ -523,6 +782,15 @@ void loop() {
 #endif
   audioTick();
 
+  MqttInboundMsg inbound = {};
+  while (mqttPollInbound(inbound)) {
+    if (inbound.topic == MqttInboundTopic::AlarmConfig) {
+      handleAlarmConfigPayload(inbound.payload);
+    } else if (inbound.topic == MqttInboundTopic::Notify) {
+      handleNotifyPayload(inbound.payload, nowMs);
+    }
+  }
+
   struct tm localTm = {};
   bool clockValid = false;
   int64_t epochSec = 0;
@@ -540,6 +808,18 @@ void loop() {
 #endif
   } else {
     evaluateAlarmTick(nowMs, localTm, clockValid);
+  }
+
+  if (reminderPlayingActive) {
+#ifdef NEKOMATE_SIM
+    if (!simUseStepClock && (nowMs - reminderStartedRealMs) >= REMINDER_MAX_DURATION_MS) {
+      stopReminderPlayback(false, clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid, epochSec, clockValid);
+    }
+#else
+    if ((nowMs - reminderStartedRealMs) >= REMINDER_MAX_DURATION_MS) {
+      stopReminderPlayback(false, clockValid ? localTm.tm_hour : -1, clockValid ? localTm.tm_min : -1, clockValid, epochSec, clockValid);
+    }
+#endif
   }
 
   if (currentPage == ScreenPage::FACE) {

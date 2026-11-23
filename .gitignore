@@ -14,6 +14,7 @@ desktop.ini
 
 # NekoMate runtime, secrets & build artifacts
 cat_firmware/cat/secrets.h
+cat_firmware/cat/build/
 cat_firmware/sim/build/
 server/node_modules/
 server/.env

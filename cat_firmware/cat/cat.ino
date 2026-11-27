@@ -28,10 +28,13 @@ constexpr int TFT_DC = 14;
 constexpr int TFT_RST = 21;   // SCK = 12, MOSI = 11 (SPI mặc định ESP32-S3)
 constexpr int TOUCH_PIN = 4;  // TTP223: chạm = HIGH
 
-constexpr uint16_t BG = 0x2105;
+constexpr uint16_t BG = 0x1908;       // navy #1E2140
 constexpr uint16_t FUR = 0xFFDF;
-constexpr uint16_t EYE = 0xFE60;
-constexpr uint16_t PINK = 0xFB56;
+constexpr uint16_t EYE = 0xF5C9;      // amber #F0B848
+constexpr uint16_t PINK = 0xF476;     // #F08CB4
+constexpr uint16_t WHISKER = 0x9D16;  // grey #9AA0B4
+constexpr uint16_t EAR = 0x29AC;      // #2E3460
+constexpr uint16_t EAR_IN = 0x7A4D;   // #7A4A6A
 constexpr uint16_t ACCENT = 0x7E5F;
 
 constexpr uint32_t TOUCH_DEBOUNCE_MS = 40;
@@ -266,51 +269,88 @@ void emitAlarmConfigEvent(ApplyAlarmResult res, const AlarmConfig &incoming) {
   mqttEnqueueEvent(buf);
 }
 
+// Pixel-art face: everything is drawn from 10px (eyes) / 6-8px (details) blocks.
+constexpr int EYE_BLOCK = 10;
+constexpr int EYE_LEFT_X = 45;
+constexpr int EYE_RIGHT_X = 145;
+constexpr int EYE_TOP_Y = 90;
+
+void drawPixelEar(int cx) {
+  for (int i = 0; i < 6; i++) {
+    tft.fillRect(cx - 6 - i * 6, 8 + i * 8, 12 + i * 12, 8, EAR);
+    if (i >= 2) tft.fillRect(cx - 6 - (i - 2) * 6, 8 + i * 8, 12 + (i - 2) * 12, 8, EAR_IN);
+  }
+}
+
 void drawFaceStatic() {
   tft.fillScreen(BG);
-  tft.fillTriangle(30, 70, 70, 20, 95, 70, FUR);
-  tft.fillTriangle(210, 70, 170, 20, 145, 70, FUR);
-  tft.fillTriangle(48, 64, 70, 34, 84, 64, PINK);
-  tft.fillTriangle(192, 64, 170, 34, 156, 64, PINK);
-  tft.fillTriangle(110, 150, 130, 150, 120, 160, PINK);
-  tft.drawLine(120, 160, 108, 172, FUR);
-  tft.drawLine(120, 160, 132, 172, FUR);
-  for (int i = 0; i < 2; i++) {
-    tft.drawLine(20, 150 + i * 12, 85, 156 + i * 6, FUR);
-    tft.drawLine(220, 150 + i * 12, 155, 156 + i * 6, FUR);
+  drawPixelEar(54);
+  drawPixelEar(186);
+
+  // nose: stepped pink triangle
+  tft.fillRect(108, 140, 24, 6, PINK);
+  tft.fillRect(114, 146, 12, 6, PINK);
+  tft.fillRect(118, 152, 4, 4, PINK);
+
+  // mouth: white pixel "w"
+  for (int i = 0; i < 5; i++) {
+    tft.fillRect(105 + i * 6, (i % 2 == 0) ? 158 : 164, 6, 6, FUR);
+  }
+
+  // whiskers: grey dashes
+  tft.fillRect(22, 148, 30, 5, WHISKER);
+  tft.fillRect(28, 162, 24, 5, WHISKER);
+  tft.fillRect(188, 148, 30, 5, WHISKER);
+  tft.fillRect(188, 162, 24, 5, WHISKER);
+}
+
+// Draws one eye from a list of (col,row) blocks on the EYE_BLOCK grid.
+void drawEyeBlocks(int x0, const uint8_t (*cells)[2], int count, uint16_t color) {
+  for (int i = 0; i < count; i++) {
+    tft.fillRect(x0 + cells[i][0] * EYE_BLOCK, EYE_TOP_Y + cells[i][1] * EYE_BLOCK, EYE_BLOCK, EYE_BLOCK, color);
   }
 }
 
 void drawEyeRegion(Mood m, bool blink) {
-  tft.fillRect(50, 90, 50, 44, BG);
-  tft.fillRect(140, 90, 50, 44, BG);
-  tft.fillRect(192, 74, 24, 24, BG);
-  tft.fillRect(210, 54, 24, 22, BG);
+  tft.fillRect(EYE_LEFT_X - 5, EYE_TOP_Y - 5, 60, 50, BG);
+  tft.fillRect(EYE_RIGHT_X - 5, EYE_TOP_Y - 5, 60, 50, BG);
+  tft.fillRect(198, 58, 40, 36, BG);  // "z z" area
 
-  if (m == Mood::SLEEPY || blink) {
-    tft.fillRect(55, 115, 40, 6, FUR);
-    tft.fillRect(145, 115, 40, 6, FUR);
-    if (m == Mood::SLEEPY) {
-      tft.setTextColor(FUR);
-      tft.setTextSize(3);
-      tft.setCursor(194, 76);
-      tft.print(F("z"));
-      tft.setTextSize(2);
-      tft.setCursor(212, 58);
-      tft.print(F("z"));
-    }
+  static const uint8_t HAPPY_EYE[][2] = {{0, 3}, {1, 2}, {2, 1}, {3, 2}, {4, 3}};           // ^
+  static const uint8_t SLEEPY_EYE[][2] = {{0, 2}, {1, 3}, {2, 3}, {3, 3}, {4, 2}};          // u
+  static const uint8_t BLINK_EYE[][2] = {{0, 3}, {1, 3}, {2, 3}, {3, 3}, {4, 3}};           // -
+  static const uint8_t OPEN_EYE[][2] = {{1, 0}, {2, 0}, {3, 0}, {0, 1}, {1, 1}, {2, 1}, {3, 1}, {4, 1},
+                                        {0, 2}, {1, 2}, {2, 2}, {3, 2}, {4, 2}, {1, 3}, {2, 3}, {3, 3}};
+
+  const uint8_t (*cells)[2] = OPEN_EYE;
+  int count = sizeof(OPEN_EYE) / sizeof(OPEN_EYE[0]);
+  if (m == Mood::SLEEPY) {
+    cells = SLEEPY_EYE;
+    count = 5;
+  } else if (blink) {
+    cells = BLINK_EYE;
+    count = 5;
   } else if (m == Mood::HAPPY) {
-    for (int i = 0; i < 4; i++) {
-      tft.drawLine(55, 125 - i, 75, 105 - i, EYE);
-      tft.drawLine(75, 105 - i, 95, 125 - i, EYE);
-      tft.drawLine(145, 125 - i, 165, 105 - i, EYE);
-      tft.drawLine(165, 105 - i, 185, 125 - i, EYE);
-    }
-  } else {
-    tft.fillRoundRect(60, 95, 30, 36, 10, EYE);
-    tft.fillRoundRect(150, 95, 30, 36, 10, EYE);
-    tft.fillRect(71, 100, 8, 26, BG);
-    tft.fillRect(161, 100, 8, 26, BG);
+    cells = HAPPY_EYE;
+    count = 5;
+  }
+  drawEyeBlocks(EYE_LEFT_X, cells, count, EYE);
+  drawEyeBlocks(EYE_RIGHT_X, cells, count, EYE);
+
+  if (cells == OPEN_EYE) {
+    // white sparkle on a solid pixel eye
+    tft.fillRect(EYE_LEFT_X + 10, EYE_TOP_Y + 10, 10, 10, FUR);
+    tft.fillRect(EYE_RIGHT_X + 10, EYE_TOP_Y + 10, 10, 10, FUR);
+  }
+
+  if (m == Mood::SLEEPY) {
+    tft.setTextColor(FUR);
+    tft.setTextSize(2);
+    tft.setCursor(202, 78);
+    tft.print(F("z"));
+    tft.setTextSize(3);
+    tft.setCursor(216, 58);
+    tft.print(F("z"));
   }
 }
 
@@ -743,6 +783,7 @@ void pollSerialSim(uint32_t nowMs) {
 
 void setup() {
   Serial.begin(115200);
+  delay(2000);  // ST7789 needs time after power-up before init, else it ignores commands
   pinMode(TOUCH_PIN, INPUT);
 
   setenv("TZ", "ICT-7", 1);
@@ -754,7 +795,8 @@ void setup() {
 #ifdef NEKOMATE_SIM
   tft.begin();
 #else
-  tft.init(240, 240);
+  tft.init(240, 240, SPI_MODE3);  // 240x240 modules without a CS pin only respond in SPI mode 3
+  tft.setSPISpeed(10000000);      // long jumper wires corrupt the default faster clock
 #endif
   tft.setRotation(0);
 

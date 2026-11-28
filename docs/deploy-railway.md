@@ -1,74 +1,101 @@
-# Deploy NekoMate lên Railway + HiveMQ Cloud
+# Deploy NekoMate lên Railway
 
-Không cần VPS, không cần tên miền riêng. Máy tính của bạn tắt cũng được.
+Không cần VPS, không cần tên miền riêng, không cần broker bên ngoài. Máy tính của bạn tắt cũng được.
 
 ```
-ESP32 ──mqtts://<cluster>.hivemq.cloud:8883──▶ HiveMQ Cloud (broker)
-                                                  ▲
-Railway (server + dashboard + SQLite) ──mqtts─────┘
-Trình duyệt ──https://<app>.up.railway.app──▶ Railway
+ESP32 ──wss://<mqtt>.up.railway.app:443/mqtt──▶ service "mosquitto" :9001 (WebSocket)
+                                                     ▲
+service "app" ──mqtt://mosquitto.railway.internal:1883 (mạng nội bộ Railway)
+Trình duyệt ──https://<app>.up.railway.app──▶ service "app" (server + dashboard + SQLite)
 ```
 
-Caddy, Mosquitto, `compose.prod.yaml` không dùng ở cách này (chúng dành cho [deploy-vps.md](deploy-vps.md)).
+Hai service trong cùng một project Railway, build từ cùng repo GitHub:
 
-## 1. Broker MQTT trên HiveMQ Cloud
+| Service | Root Directory | Build từ |
+|---|---|---|
+| `mosquitto` | `server/mqtt-railway` | `server/mqtt-railway/Dockerfile` |
+| `app` | `server` | `server/Dockerfile` |
 
-1. Đăng ký <https://console.hivemq.cloud>, tạo cluster **Serverless (Free)**.
-2. Ghi lại **Cluster URL** (dạng `xxxxxxxx.s1.eu.hivemq.cloud`), cổng TLS **8883**.
-3. Mục **Access Management → Credentials**, tạo 2 tài khoản (quyền Publish and Subscribe):
-   - `nekomate-server` / mật khẩu server
-   - `nekomate-01` / mật khẩu thiết bị
+Caddy và `compose.prod.yaml` không dùng ở cách này (chúng dành cho [deploy-vps.md](deploy-vps.md)).
 
-## 2. Tạo mật khẩu dashboard (trên máy bạn)
+## 0. Chuẩn bị (trên máy bạn)
+
+Tự nghĩ 3 mật khẩu, lưu ở chỗ an toàn:
+
+- mật khẩu MQTT của server
+- mật khẩu MQTT của thiết bị (ESP32)
+- mật khẩu đăng nhập dashboard
+
+Tạo hash cho mật khẩu dashboard:
 
 ```bash
 cd server
 npm run hash-password -- "MAT-KHAU-DASHBOARD"
 ```
 
-Giữ chuỗi hash in ra cho bước 3.
-
-## 3. Server trên Railway
+## 1. Service `mosquitto`
 
 1. <https://railway.com> → **New Project → Deploy from GitHub repo** → chọn repo NekoMate.
-2. Vào service → **Settings**:
-   - **Root Directory**: `server` (Railway tự build bằng `server/Dockerfile`).
-   - **Networking → Generate Domain**, ghi lại `https://<app>.up.railway.app`.
-3. Chuột phải service → **Attach Volume**, Mount path: `/app/data` (giữ SQLite qua mỗi lần deploy).
-4. Tab **Variables**, thêm:
+2. Service vừa tạo → **Settings**:
+   - **Service Name**: `mosquitto` (tên này tạo ra địa chỉ nội bộ `mosquitto.railway.internal`).
+   - **Root Directory**: `server/mqtt-railway`.
+   - **Networking → Generate Domain**, ô port nhập **9001**. Ghi lại `<mqtt>.up.railway.app`.
+3. **Variables**:
 
    | Biến | Giá trị |
    |---|---|
-   | `HOST` | `0.0.0.0` (bắt buộc, mặc định 127.0.0.1 thì Railway không vào được) |
+   | `MQTT_SERVER_PASSWORD` | mật khẩu MQTT của server |
+   | `MQTT_DEVICE_PASSWORD` | mật khẩu MQTT của thiết bị |
+
+4. (Nên làm) Chuột phải service → **Attach Volume**, mount path `/mosquitto/data`: giữ cấu hình báo thức (retained) khi broker khởi động lại.
+5. Deploy. Log phải có `mosquitto version ... running`.
+
+## 2. Service `app`
+
+1. Trong cùng project → **Create → GitHub Repo** → lại chọn repo NekoMate.
+2. **Settings**:
+   - **Service Name**: `app`.
+   - **Root Directory**: `server`.
+   - **Networking → Generate Domain** (port 3000). Ghi lại `https://<app>.up.railway.app`.
+3. Chuột phải service → **Attach Volume**, mount path `/app/data` (giữ SQLite qua mỗi lần deploy).
+4. **Variables**:
+
+   | Biến | Giá trị |
+   |---|---|
+   | `HOST` | `::` (bắt buộc: mặc định 127.0.0.1 thì Railway không vào được) |
+   | `PORT` | `3000` |
    | `APP_BASE_URL` | `https://<app>.up.railway.app` |
-   | `OWNER_PASSWORD_HASH` | hash ở bước 2 (dán nguyên, không cần dấu nháy) |
+   | `OWNER_PASSWORD_HASH` | hash ở bước 0 (dán nguyên, không cần dấu nháy) |
    | `DB_PATH` | `/app/data/nekomate.db` |
-   | `MQTT_URL` | `mqtts://<cluster-url>:8883` |
+   | `MQTT_URL` | `mqtt://mosquitto.railway.internal:1883` |
    | `MQTT_USERNAME` | `nekomate-server` |
-   | `MQTT_PASSWORD` | mật khẩu server ở bước 1 |
+   | `MQTT_PASSWORD` | `${{mosquitto.MQTT_SERVER_PASSWORD}}` (tham chiếu biến của service kia, khỏi gõ lại) |
    | `COMPOSIO_API_KEY` | nếu dùng nguồn lịch |
 
-   `PORT` do Railway tự đặt, không cần thêm. `DEVICE_ID`, `TIMEZONE` có mặc định.
-5. Deploy. Xem **Deploy Logs**, mở `https://<app>.up.railway.app` để đăng nhập dashboard.
+5. Deploy. Mở `https://<app>.up.railway.app` để đăng nhập dashboard.
 
-Mỗi lần `git push` lên nhánh đã chọn, Railway tự deploy lại.
+Mỗi lần `git push` lên `main`, Railway tự deploy lại cả hai service.
 
-## 4. Nạp lại ESP32
+## 3. Nạp lại ESP32
 
 Trong `cat_firmware/cat/secrets.h`:
 
 ```c
-#define MQTT_HOST "<cluster-url>"      // không có mqtts://
-#define MQTT_PORT 8883
+#define MQTT_HOST "<mqtt>.up.railway.app"   // domain của service mosquitto, không có https://
+#define MQTT_PORT 443
 #define MQTT_USE_TLS 1
+#define MQTT_WS_PATH "/mqtt"
 #define MQTT_USER "nekomate-01"
-#define MQTT_PASS "<mật khẩu thiết bị>"
-#define MQTT_WS_PATH ""                // TCP/TLS thường
-#define MQTT_CA_CERT ""                // dùng bộ root CA có sẵn trong ESP32
+#define MQTT_PASS "<mật khẩu MQTT của thiết bị>"
+#define MQTT_CA_CERT ""                     // dùng bộ root CA có sẵn trong ESP32
 ```
 
 ESP32 chỉ cần Wi-Fi có internet, không cần cùng mạng với server.
 
+## Đổi mật khẩu MQTT
+
+Sửa biến trên service `mosquitto` rồi redeploy: file mật khẩu được tạo lại mỗi lần khởi động. Nhớ nạp lại ESP32 nếu đổi mật khẩu thiết bị.
+
 ## Sao lưu
 
-Railway → service → **Volume → Backups** (tạo bản sao lưu thủ công hoặc theo lịch).
+Railway → service `app` → **Volume → Backups** (sao lưu thủ công hoặc theo lịch).

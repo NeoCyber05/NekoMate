@@ -1,0 +1,11 @@
+# shortcut: copy of ../mosquitto/acl (Railway build context cannot reach the parent folder); keep both in sync.
+# Tài khoản backend NekoMate
+user nekomate-server
+topic readwrite nekomate/devices/#
+
+# Tài khoản thiết bị ESP32-S3 (nekomate-01)
+user nekomate-01
+topic read nekomate/devices/nekomate-01/notify
+topic read nekomate/devices/nekomate-01/alarms/config
+topic write nekomate/devices/nekomate-01/events
+topic write nekomate/devices/nekomate-01/status

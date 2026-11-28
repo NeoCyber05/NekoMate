@@ -50,7 +50,14 @@ constexpr size_t DEDUP_CAPACITY = 32;
 #ifdef NEKOMATE_SIM
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC, TFT_RST);
 #else
-Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
+// init() sends its command list at the 32 MHz default before setSPISpeed() can run;
+// over jumper wires that intermittently leaves the panel black, so force 10 MHz from the start.
+class SlowST7789 : public Adafruit_ST7789 {
+ public:
+  using Adafruit_ST7789::Adafruit_ST7789;
+  void begin(uint32_t) override { Adafruit_ST7789::begin(10000000); }
+};
+SlowST7789 tft(TFT_CS, TFT_DC, TFT_RST);
 #endif
 
 enum class Mood : uint8_t {
@@ -784,7 +791,7 @@ void pollSerialSim(uint32_t nowMs) {
 void setup() {
   Serial.begin(115200);
   delay(2000);  // ST7789 needs time after power-up before init, else it ignores commands
-  pinMode(TOUCH_PIN, INPUT);
+  pinMode(TOUCH_PIN, INPUT_PULLDOWN);  // a loose/missing SIG wire reads LOW instead of random touches
 
   setenv("TZ", "ICT-7", 1);
   tzset();
@@ -796,7 +803,6 @@ void setup() {
   tft.begin();
 #else
   tft.init(240, 240, SPI_MODE3);  // 240x240 modules without a CS pin only respond in SPI mode 3
-  tft.setSPISpeed(10000000);      // long jumper wires corrupt the default faster clock
 #endif
   tft.setRotation(0);
 

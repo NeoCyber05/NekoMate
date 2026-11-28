@@ -1,0 +1,47 @@
+# Production stack for a VPS: docker compose -f compose.prod.yaml up -d --build
+# Only Caddy is exposed (80/443). Dashboard = https://$DOMAIN, MQTT for the ESP32 = wss://$DOMAIN/mqtt.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+      APP_BASE_URL: https://${DOMAIN:?set DOMAIN in .env}
+      DB_PATH: /app/data/nekomate.db
+      MQTT_URL: mqtt://mqtt:1883
+    volumes:
+      - app_data:/app/data
+    depends_on:
+      - mqtt
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto.prod.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto:/mosquitto/auth:ro
+      - mosquitto_data:/mosquitto/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+      - mqtt
+
+volumes:
+  app_data:
+  mosquitto_data:
+  caddy_data:
+  caddy_config:

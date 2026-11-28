@@ -17,9 +17,12 @@ cat_firmware/cat/secrets.h
 cat_firmware/cat/build/
 cat_firmware/sim/build/
 server/node_modules/
+server/public/ui/
 server/.env
 server/data/
 server/mosquitto/passwd
 *.db
 *.db-wal
 *.db-shm
+server/.local-credentials.txt
+server/data-server.log

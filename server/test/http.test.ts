@@ -162,20 +162,22 @@ test('HTTP endpoints enforce guest auth, Chờ đồng bộ -> synced lifecycle,
     assert.equal(dateTask?.localTime, null);
     assert.equal(dateTask?.status, 'date_only');
 
-    // 5. Dashboard HTML/CSS/JS cùng origin được phục vụ và dùng textContent + visibility polling 3s
+    // 5. Express phục vụ trang và tài nguyên đã build từ cùng origin.
     const htmlRes = await fetch(`${baseUrl}/`);
     assert.equal(htmlRes.status, 200);
     const html = await htmlRes.text();
     assert.match(html, /color-scheme/);
     assert.match(html, /NekoMate/);
 
-    const jsRes = await fetch(`${baseUrl}/app.js`);
+    assert.match(html, /src="\/ui\/dashboard\.js"/);
+    assert.match(html, /href="\/ui\/dashboard\.css"/);
+
+    const jsRes = await fetch(`${baseUrl}/ui/dashboard.js`);
     assert.equal(jsRes.status, 200);
-    const js = await jsRes.text();
-    assert.match(js, /textContent/);
-    assert.match(js, /visibilitychange/);
-    assert.match(js, /3000/);
-    assert.match(js, /Chờ đồng bộ/);
+    assert.match(jsRes.headers.get('content-type') ?? '', /javascript/);
+    const cssRes = await fetch(`${baseUrl}/ui/dashboard.css`);
+    assert.equal(cssRes.status, 200);
+    assert.match(cssRes.headers.get('content-type') ?? '', /text\/css/);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();

@@ -1,0 +1,9 @@
+{$DOMAIN} {
+	# ESP32 MQTT over secure WebSocket
+	handle /mqtt* {
+		reverse_proxy mqtt:9001
+	}
+	handle {
+		reverse_proxy app:3000
+	}
+}

@@ -3,7 +3,7 @@ services:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "127.0.0.1:1883:1883"
+      - "1883:1883"  # LAN-reachable so the ESP32 can connect; auth is enforced by passwd + acl
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./mosquitto:/mosquitto/auth:ro

@@ -1,149 +1,28 @@
 <!doctype html>
-<html lang="vi">
+<html lang="vi" data-type="software" data-radius="soft" data-buttons="solid" data-motion>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#171e35" />
+    <meta name="page-type" content="software" />
+    <meta name="site-kind" content="software" />
+    <meta name="description" content="Bảng điều khiển đồng hồ NekoMate. Đặt báo thức, gửi lời nhắc và liên kết lịch của bạn." />
+    <meta property="og:title" content="NekoMate · Bảng điều khiển" />
+    <meta property="og:description" content="Báo thức, lời nhắc và lịch trên đồng hồ NekoMate." />
+    <meta property="og:type" content="website" />
     <title>NekoMate · Bảng điều khiển</title>
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="icon" href="/nekomate.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/ui/dashboard.css" />
+    <link rel="stylesheet" href="/assets/motion/motion.css" />
+    <link rel="stylesheet" href="/assets/moments/cursor-spotlight/moment.css" />
+    <script>document.documentElement.classList.add('m-enter');setTimeout(()=>document.documentElement.classList.add('m-enter-done'),700)</script>
   </head>
   <body>
-    <header class="site-header">
-      <div class="header-inner">
-        <div class="brand">
-          <h1>NekoMate</h1>
-          <p class="subtitle">Đồng hồ để bàn thông minh &amp; lời nhắc cá nhân</p>
-        </div>
-        <div class="header-status" id="header-status" hidden>
-          <span class="badge" id="online-badge">Ngoại tuyến</span>
-          <span class="badge" id="sync-badge">Chưa cài đặt</span>
-          <button type="button" id="logout-btn" class="btn-secondary">Đăng xuất</button>
-        </div>
-      </div>
-    </header>
-
-    <main id="main-content" class="container">
-      <div id="live-status" class="status-banner" role="status" aria-live="polite" hidden></div>
-
-      <section id="login-section" class="card login-card" aria-labelledby="login-heading">
-        <h2 id="login-heading">Đăng nhập chủ thiết bị</h2>
-        <form id="login-form" method="POST" action="/api/auth/login" novalidate>
-          <div class="field">
-            <label for="login-password">Mật khẩu quản trị <span aria-hidden="true">*</span></label>
-            <span id="password-hint" class="hint">Nhập mật khẩu đã băm bằng scrypt trong cấu hình máy chủ.</span>
-            <div class="password-row">
-              <input
-                id="login-password"
-                name="password"
-                type="password"
-                autocomplete="current-password"
-                required
-                aria-invalid="false"
-                aria-describedby="password-hint"
-                data-error="password-error"
-              />
-              <button
-                type="button"
-                id="toggle-password-btn"
-                class="btn-secondary"
-                aria-pressed="false"
-                aria-label="Hiện mật khẩu"
-              >
-                Hiện
-              </button>
-            </div>
-            <div id="password-error" class="error-msg" hidden>
-              <span role="img" aria-label="Lỗi">!</span> Vui lòng nhập mật khẩu quản trị.
-            </div>
-          </div>
-          <button type="submit" id="login-submit-btn" class="btn-primary">Đăng nhập</button>
-        </form>
-      </section>
-
-      <div id="dashboard-section" class="dashboard-grid" hidden>
-        <section class="card" aria-labelledby="alarm-heading">
-          <h2 id="alarm-heading">Báo thức cục bộ trên ESP32</h2>
-          <p class="hint" id="alarm-confirmed-summary">Chưa có cấu hình xác nhận từ đồng hồ.</p>
-          <form id="alarm-form" method="POST" action="/api/alarm" aria-labelledby="alarm-heading" novalidate>
-            <div class="field">
-              <label for="alarm-time">Giờ báo thức (ICT+7) <span aria-hidden="true">*</span></label>
-              <input
-                id="alarm-time"
-                name="time"
-                type="time"
-                value="07:00"
-                required
-                aria-invalid="false"
-                data-error="alarm-time-error"
-              />
-              <div id="alarm-time-error" class="error-msg" hidden>
-                <span role="img" aria-label="Lỗi">!</span> Vui lòng chọn giờ báo thức hợp lệ.
-              </div>
-            </div>
-
-            <fieldset class="days-fieldset">
-              <legend>Ngày lặp lại trong tuần</legend>
-              <div class="days-grid" id="alarm-days">
-                <label class="day-chip"><input type="checkbox" name="days" value="1" checked /> <span>T2</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="2" checked /> <span>T3</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="3" checked /> <span>T4</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="4" checked /> <span>T5</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="5" checked /> <span>T6</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="6" /> <span>T7</span></label>
-                <label class="day-chip"><input type="checkbox" name="days" value="7" /> <span>CN</span></label>
-              </div>
-              <div id="alarm-days-error" class="error-msg" hidden>
-                <span role="img" aria-label="Lỗi">!</span> Khi bật báo thức, hãy chọn ít nhất một ngày lặp.
-              </div>
-            </fieldset>
-
-            <div class="checkbox-row">
-              <input id="alarm-enabled" name="enabled" type="checkbox" checked />
-              <label for="alarm-enabled">Bật báo thức tự động (vẫn reo khi mất Wi-Fi)</label>
-            </div>
-
-            <button type="submit" id="alarm-submit-btn" class="btn-primary">Lưu báo thức</button>
-          </form>
-        </section>
-
-        <section class="card" aria-labelledby="test-heading">
-          <h2 id="test-heading">Gửi thông báo thử xuống đồng hồ</h2>
-          <form id="test-notify-form" method="POST" action="/api/notifications/test" aria-labelledby="test-heading">
-            <div class="field">
-              <label for="test-title">Tiêu đề hiển thị</label>
-              <span id="test-title-hint" class="hint">Backend giữ Unicode trên web và chuẩn hóa ASCII khi gửi MQTT.</span>
-              <input
-                id="test-title"
-                name="title"
-                type="text"
-                maxlength="80"
-                value="Uống nước nào 🐱"
-                aria-describedby="test-title-hint"
-              />
-            </div>
-            <button type="submit" id="test-submit-btn" class="btn-primary">Gửi lời nhắc thử</button>
-          </form>
-        </section>
-
-        <section class="card span-2" aria-labelledby="sources-heading">
-          <div class="section-head">
-            <h2 id="sources-heading">Nguồn lịch &amp; công việc (Composio)</h2>
-            <button type="button" id="refresh-sources-btn" class="btn-secondary">Làm mới nguồn</button>
-          </div>
-          <div id="sources-list" class="sources-grid"></div>
-        </section>
-
-        <section class="card span-2" aria-labelledby="reminders-heading">
-          <div class="section-head">
-            <h2 id="reminders-heading">Lịch &amp; lời nhắc sắp tới</h2>
-            <button type="button" id="refresh-reminders-btn" class="btn-secondary">Cập nhật danh sách</button>
-          </div>
-          <ul id="reminders-list" class="reminders-list"></ul>
-          <p id="reminders-empty" class="hint" hidden>Chưa có lời nhắc hoặc sự kiện nào trong cửa sổ 7 ngày tới.</p>
-        </section>
-      </div>
-    </main>
-
-    <script type="module" src="/app.js"></script>
+    <a class="skip-link" href="#main-content">Bỏ qua tới nội dung chính</a>
+    <div id="app"></div>
+    <noscript><main id="main-content" class="noscript"><h1>NekoMate</h1><p>Hãy bật JavaScript để sử dụng bảng điều khiển đồng hồ.</p></main></noscript>
+    <script type="module" src="/ui/dashboard.js"></script>
+    <script type="module" src="/assets/motion/motion.js"></script>
   </body>
 </html>

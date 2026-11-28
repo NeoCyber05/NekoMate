@@ -1,0 +1,9 @@
+node_modules
+public/ui
+data
+test
+.env
+.env.*
+.local-credentials.txt
+*.log
+mosquitto

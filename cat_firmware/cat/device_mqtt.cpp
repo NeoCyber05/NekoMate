@@ -11,6 +11,12 @@
 
 #if __has_include("secrets.h")
 #include "secrets.h"
+
+#include <esp_crt_bundle.h>
+
+#ifndef MQTT_WS_PATH
+#define MQTT_WS_PATH ""
+#endif
 #else
 #define WIFI_SSID "Wokwi-GUEST"
 #define WIFI_PASS ""
@@ -140,6 +146,7 @@ void mqttEventHandler(void *handlerArgs, esp_event_base_t base, int32_t eventId,
 
   switch (static_cast<esp_mqtt_event_id_t>(eventId)) {
     case MQTT_EVENT_CONNECTED:
+      Serial.println(F("net:mqtt connected"));
       g_mqttConnected = true;
       g_subsReady = false;
       g_subNotifyAck = false;
@@ -149,6 +156,7 @@ void mqttEventHandler(void *handlerArgs, esp_event_base_t base, int32_t eventId,
       break;
 
     case MQTT_EVENT_DISCONNECTED:
+      Serial.println(F("net:mqtt disconnected"));
       g_mqttConnected = false;
       g_subsReady = false;
       g_rxActive = false;
@@ -205,7 +213,14 @@ void networkTask(void *arg) {
       wifiStarted = true;
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
+    static wl_status_t lastWifi = WL_IDLE_STATUS;
+    const wl_status_t wifiNow = WiFi.status();
+    if (wifiNow != lastWifi) {
+      lastWifi = wifiNow;
+      Serial.printf("net:wifi status=%d ip=%s\n", static_cast<int>(wifiNow), WiFi.localIP().toString().c_str());
+    }
+
+    if (wifiNow == WL_CONNECTED) {
       if (!mqttClientStarted && g_client != nullptr && strlen(MQTT_HOST) > 0) {
         if (esp_mqtt_client_start(g_client) == ESP_OK) {
           mqttClientStarted = true;
@@ -252,8 +267,15 @@ bool mqttStart() {
   cfg.broker.address.port = MQTT_PORT;
   cfg.broker.address.transport = (MQTT_USE_TLS != 0) ? MQTT_TRANSPORT_OVER_SSL : MQTT_TRANSPORT_OVER_TCP;
 #if MQTT_USE_TLS != 0
+  if (strlen(MQTT_WS_PATH) > 0) {
+    // VPS deploy: wss://MQTT_HOST/mqtt through Caddy on port 443
+    cfg.broker.address.transport = MQTT_TRANSPORT_OVER_WSS;
+    cfg.broker.address.path = MQTT_WS_PATH;
+  }
   if (strlen(MQTT_CA_CERT) > 0) {
     cfg.broker.verification.certificate = MQTT_CA_CERT;
+  } else {
+    cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;  // public CAs (Let's Encrypt)
   }
 #endif
   if (strlen(MQTT_USER) > 0) {

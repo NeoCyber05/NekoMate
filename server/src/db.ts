@@ -95,6 +95,19 @@ export function openDatabase(dbPath: string): DatabaseSync {
     );
   `);
 
+  const alarmColumns = new Set(db.prepare('PRAGMA table_info(alarm_config)').all().map(row => row['name']));
+  if (!alarmColumns.has('pending_entries')) db.exec('ALTER TABLE alarm_config ADD COLUMN pending_entries TEXT');
+  if (!alarmColumns.has('confirmed_entries')) db.exec('ALTER TABLE alarm_config ADD COLUMN confirmed_entries TEXT');
+  db.exec(`
+    CREATE VIEW IF NOT EXISTS active_alarm_replacements AS
+    SELECT json_extract(alarm.value, '$.sourceId') AS source_id,
+           json_extract(alarm.value, '$.itemId') AS external_id,
+           json_extract(alarm.value, '$.sourceNotifyAt') AS notify_at
+    FROM alarm_config, json_each(confirmed_entries) AS alarm
+    WHERE json_extract(alarm.value, '$.enabled') = 1
+      AND json_extract(alarm.value, '$.replacesReminder') = 1
+  `);
+
   return db;
 }
 

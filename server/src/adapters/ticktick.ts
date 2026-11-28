@@ -95,6 +95,7 @@ export const ticktickAdapter: SourceAdapter = {
 
       const dueRaw = task['dueDate'] ?? task['startDate'];
       if (typeof dueRaw !== 'string' || !dueRaw.trim()) {
+        items.push({ externalId: id, title, dateOnly: null, notifyAt: null });
         continue;
       }
 

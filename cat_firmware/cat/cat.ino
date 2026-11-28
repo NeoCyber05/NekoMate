@@ -380,7 +380,12 @@ void drawAlarmBadge() {
   const AlarmConfig &cfg = alarmCurrent();
   tft.setTextSize(1);
   tft.setCursor(62, 222);
-  if (cfg.revision > 0 && cfg.enabled) {
+  if (cfg.listMode && cfg.count > 0) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "BAO THUC: %u MUC", cfg.count);
+    tft.setTextColor(EYE);
+    tft.print(buf);
+  } else if (cfg.revision > 0 && cfg.enabled) {
     char buf[24];
     snprintf(buf, sizeof(buf), "BAO THUC %02u:%02u", cfg.hour, cfg.minute);
     tft.setTextColor(EYE);
@@ -391,16 +396,18 @@ void drawAlarmBadge() {
   }
 }
 
+void drawWrappedText(const char *text, int startX, int startY, int maxCols, int lineHeight, int maxLines);
+
 void drawAlarmAlertPage(int hour, int minute, bool clockValid) {
   tft.fillScreen(BG);
   tft.drawRoundRect(14, 18, 212, 204, 16, EYE);
   tft.setTextColor(EYE);
   tft.setTextSize(3);
-  tft.setCursor(48, 52);
+  tft.setCursor(48, 39);
   tft.print(F("BAO THUC"));
   tft.setTextColor(FUR);
   tft.setTextSize(4);
-  tft.setCursor(60, 106);
+  tft.setCursor(60, 83);
   if (clockValid) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", hour, minute);
@@ -411,9 +418,12 @@ void drawAlarmAlertPage(int hour, int minute, bool clockValid) {
     snprintf(buf, sizeof(buf), "%02u:%02u", cfg.hour, cfg.minute);
     tft.print(buf);
   }
+  tft.setTextColor(FUR);
+  tft.setTextSize(1);
+  drawWrappedText(alarmFiredTitle(), 42, 133, 22, 13, 3);
   tft.setTextSize(2);
   tft.setTextColor(PINK);
-  tft.setCursor(44, 174);
+  tft.setCursor(44, 185);
   tft.print(F("Cham de tat"));
 }
 

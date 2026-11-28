@@ -126,11 +126,7 @@ export const microsoftTodoAdapter: SourceAdapter = {
           notifyAt = parseMicrosoftDateTime(task['reminderDateTime'], timezone);
         }
 
-        if (notifyAt !== null) {
-          items.push({ externalId: id, title, dateOnly: null, notifyAt });
-        } else if (dateOnly) {
-          items.push({ externalId: id, title, dateOnly, notifyAt: null });
-        }
+        items.push({ externalId: id, title, dateOnly: notifyAt === null ? dateOnly : null, notifyAt });
       }
 
       const nextLink = payload['@odata.nextLink'] ?? payload['nextLink'];

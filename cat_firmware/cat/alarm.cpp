@@ -9,8 +9,9 @@ namespace {
 
 constexpr const char *NVS_NAMESPACE = "nekomate";
 
-AlarmConfig g_current = {"", 0, 7, 0, 0, false};
+AlarmConfig g_current = {};
 int64_t g_lastFiredMinuteKey = -1;
+char g_firedTitle[49] = {};
 
 int64_t makeMinuteKey(const struct tm &t) {
   return (static_cast<int64_t>(t.tm_year + 1900) * 100000000LL) +
@@ -19,19 +20,22 @@ int64_t makeMinuteKey(const struct tm &t) {
          static_cast<int64_t>(t.tm_min);
 }
 
-void saveConfigToNvs(const AlarmConfig &cfg) {
-  Preferences prefs;
-  if (!prefs.begin(NVS_NAMESPACE, false)) {
-    return;
+bool readSchedule(JsonObjectConst value, uint8_t &hour, uint8_t &minute, uint8_t &daysMask) {
+  if (!value["hour"].is<int>() || !value["minute"].is<int>() || !value["days"].is<JsonArrayConst>()) {
+    return false;
   }
-  prefs.putBool("hasCfg", true);
-  prefs.putString("cfgId", cfg.configId);
-  prefs.putUInt("rev", cfg.revision);
-  prefs.putUChar("hour", cfg.hour);
-  prefs.putUChar("min", cfg.minute);
-  prefs.putUChar("days", cfg.daysMask);
-  prefs.putBool("enabled", cfg.enabled);
-  prefs.end();
+  const int h = value["hour"];
+  const int m = value["minute"];
+  if (h < 0 || h > 23 || m < 0 || m > 59) return false;
+  hour = static_cast<uint8_t>(h);
+  minute = static_cast<uint8_t>(m);
+  daysMask = 0;
+  for (JsonVariantConst item : value["days"].as<JsonArrayConst>()) {
+    const int day = item.as<int>();
+    if (!item.is<int>() || day < 1 || day > 7) return false;
+    daysMask |= static_cast<uint8_t>(1U << (day - 1));
+  }
+  return true;
 }
 
 void saveLastFiredToNvs(int64_t minuteKey) {
@@ -52,7 +56,12 @@ bool alarmInit() {
   }
 
   g_lastFiredMinuteKey = prefs.getLong64("lastFired", -1);
-  if (prefs.getBool("hasCfg", false)) {
+  AlarmConfig stored = {};
+  if (prefs.getBytesLength("alarmListV1") == sizeof(stored)
+      && prefs.getBytes("alarmListV1", &stored, sizeof(stored)) == sizeof(stored)
+      && validateAlarmConfig(stored)) {
+    g_current = stored;
+  } else if (prefs.getBool("hasCfg", false)) {
     AlarmConfig loaded = {};
     String id = prefs.getString("cfgId", "");
     if (id.length() > 0 && id.length() < sizeof(loaded.configId)) {
@@ -73,11 +82,21 @@ bool alarmInit() {
 }
 
 bool validateAlarmConfig(const AlarmConfig &cfg) {
-  if (cfg.configId[0] == '\0') {
+  if (cfg.configId[0] == '\0' || cfg.configId[sizeof(cfg.configId) - 1] != '\0') {
     return false;
   }
   if (cfg.revision == 0) {
     return false;
+  }
+  if (cfg.listMode) {
+    if (cfg.count > MAX_ALARM_ENTRIES) return false;
+    for (uint8_t i = 0; i < cfg.count; ++i) {
+      const AlarmEntry &entry = cfg.entries[i];
+      if (entry.hour > 23 || entry.minute > 59 || entry.title[48] != '\0') return false;
+      if (entry.date == 0 ? entry.daysMask == 0 || entry.daysMask > 127
+          : entry.date < 20000101 || entry.date > 20991231 || entry.daysMask != 0) return false;
+    }
+    return true;
   }
   if (cfg.hour > 23 || cfg.minute > 59) {
     return false;
@@ -106,40 +125,32 @@ bool parseAlarmConfigJson(const char *json, AlarmConfig &out) {
   if (cfgId == nullptr || cfgId[0] == '\0' || strlen(cfgId) >= sizeof(out.configId)) {
     return false;
   }
-  if (!doc["revision"].is<int64_t>() || !doc["hour"].is<int>() ||
-      !doc["minute"].is<int>() || !doc["enabled"].is<bool>() ||
-      !doc["days"].is<JsonArrayConst>()) {
+  if (!doc["revision"].is<uint32_t>() || doc["revision"].as<uint32_t>() == 0) {
     return false;
-  }
-
-  const int64_t rev = doc["revision"].as<int64_t>();
-  const int hour = doc["hour"].as<int>();
-  const int minute = doc["minute"].as<int>();
-  const bool enabled = doc["enabled"].as<bool>();
-  if (rev < 1 || rev > 0xFFFFFFFFLL || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return false;
-  }
-
-  uint8_t mask = 0;
-  JsonArrayConst days = doc["days"].as<JsonArrayConst>();
-  for (JsonVariantConst item : days) {
-    if (!item.is<int>()) {
-      return false;
-    }
-    const int d = item.as<int>();
-    if (d < 1 || d > 7) {
-      return false;
-    }
-    mask |= static_cast<uint8_t>(1U << (d - 1));
   }
 
   memset(&out, 0, sizeof(out));
   strncpy(out.configId, cfgId, sizeof(out.configId) - 1);
-  out.revision = static_cast<uint32_t>(rev);
-  out.hour = static_cast<uint8_t>(hour);
-  out.minute = static_cast<uint8_t>(minute);
-  out.daysMask = mask;
-  out.enabled = enabled;
+  out.revision = doc["revision"];
+  if (!doc["alarms"].isNull()) {
+    const JsonArrayConst alarms = doc["alarms"].as<JsonArrayConst>();
+    if (alarms.isNull() || alarms.size() > MAX_ALARM_ENTRIES) return false;
+    out.listMode = true;
+    for (JsonObjectConst value : alarms) {
+      AlarmEntry &entry = out.entries[out.count++];
+      if (!readSchedule(value, entry.hour, entry.minute, entry.daysMask)
+          || !value["date"].is<uint32_t>() || !value["title"].is<const char *>()) return false;
+      entry.date = value["date"];
+      const char *title = value["title"];
+      if (strlen(title) >= sizeof(entry.title)) return false;
+      strcpy(entry.title, title);
+    }
+  } else {
+    if (!doc["enabled"].is<bool>() || !readSchedule(doc.as<JsonObjectConst>(), out.hour, out.minute, out.daysMask)) {
+      return false;
+    }
+    out.enabled = doc["enabled"];
+  }
 
   return validateAlarmConfig(out);
 }
@@ -161,8 +172,12 @@ ApplyAlarmResult applyAlarmConfig(const AlarmConfig &incoming) {
     }
   }
 
+  Preferences prefs;
+  if (!prefs.begin(NVS_NAMESPACE, false)) return ApplyAlarmResult::Invalid;
+  const bool saved = prefs.putBytes("alarmListV1", &incoming, sizeof(incoming)) == sizeof(incoming);
+  prefs.end();
+  if (!saved) return ApplyAlarmResult::Invalid;
   g_current = incoming;
-  saveConfigToNvs(g_current);
   return ApplyAlarmResult::Applied;
 }
 
@@ -171,27 +186,46 @@ const AlarmConfig &alarmCurrent() {
 }
 
 bool alarmDue(const struct tm &localTime, bool clockValid) {
-  if (!clockValid || !g_current.enabled || g_current.revision == 0) {
+  if (!clockValid || g_current.revision == 0) {
     return false;
   }
 
   // tm_wday: 0=Chu Nhat .. 6=Thu Bay -> 1=Thu Hai .. 7=Chu Nhat
   const int day1to7 = (localTime.tm_wday == 0) ? 7 : localTime.tm_wday;
-  if ((g_current.daysMask & static_cast<uint8_t>(1U << (day1to7 - 1))) == 0) {
-    return false;
-  }
-  if (localTime.tm_hour != g_current.hour || localTime.tm_min != g_current.minute) {
-    return false;
-  }
-
   const int64_t minuteKey = makeMinuteKey(localTime);
   if (minuteKey == g_lastFiredMinuteKey) {
     return false;
   }
 
+  const uint8_t dayMask = static_cast<uint8_t>(1U << (day1to7 - 1));
+  const char *title = "";
+  if (g_current.listMode) {
+    const uint32_t date = static_cast<uint32_t>((localTime.tm_year + 1900) * 10000
+        + (localTime.tm_mon + 1) * 100 + localTime.tm_mday);
+    const AlarmEntry *due = nullptr;
+    for (uint8_t i = 0; i < g_current.count; ++i) {
+      const AlarmEntry &entry = g_current.entries[i];
+      if (entry.hour == localTime.tm_hour && entry.minute == localTime.tm_min
+          && (entry.date ? entry.date == date : (entry.daysMask & dayMask) != 0)) {
+        due = &entry;
+        break;
+      }
+    }
+    if (!due) return false;
+    title = due->title;
+  } else if (!g_current.enabled || !(g_current.daysMask & dayMask)
+      || g_current.hour != localTime.tm_hour || g_current.minute != localTime.tm_min) {
+    return false;
+  }
+
+  strcpy(g_firedTitle, title);
   g_lastFiredMinuteKey = minuteKey;
   saveLastFiredToNvs(minuteKey);
   return true;
+}
+
+const char *alarmFiredTitle() {
+  return g_firedTitle;
 }
 
 const char *applyAlarmResultName(ApplyAlarmResult res) {

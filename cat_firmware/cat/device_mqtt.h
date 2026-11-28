@@ -10,7 +10,7 @@ enum class MqttInboundTopic : uint8_t {
 
 struct MqttInboundMsg {
   MqttInboundTopic topic;
-  char payload[512];
+  char payload[2304];
   size_t len;
 };
 

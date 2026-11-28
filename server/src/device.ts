@@ -2,6 +2,28 @@ import crypto from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 import { withTransaction } from './db.ts';
+import { formatLocalDateTime } from './adapters/time.ts';
+
+export const MAX_ALARMS = 12;
+
+interface AlarmEntry extends AlarmInput {
+  id: string;
+  title: string;
+  date: string | null;
+  sourceId: string | null;
+  itemId: string | null;
+  sourceDue: string | null;
+  sourceNotifyAt: number | null;
+  replacesReminder: boolean;
+}
+
+function overlaps(a: AlarmEntry, b: AlarmEntry): boolean {
+  if (!a.enabled || !b.enabled || a.hour !== b.hour || a.minute !== b.minute) return false;
+  if (a.date && b.date) return a.date === b.date;
+  const date = a.date ?? b.date;
+  if (date) return (a.date ? b.days : a.days).includes(new Date(date).getUTCDay() || 7);
+  return a.days.some(day => b.days.includes(day));
+}
 
 export interface AlarmConfig {
   configId: string;
@@ -10,6 +32,7 @@ export interface AlarmConfig {
   minute: number;
   days: number[];
   enabled: boolean;
+  entries?: AlarmEntry[];
 }
 
 export interface AlarmInput {
@@ -36,6 +59,7 @@ export interface DeviceStatusView {
   syncState: 'unconfigured' | 'pending' | 'synced';
   pendingAlarm: AlarmConfig | null;
   confirmedAlarm: Partial<AlarmConfig> | null;
+  alarms: AlarmEntry[];
 }
 
 export interface MqttTransport {
@@ -111,6 +135,8 @@ interface AlarmRow {
   confirmed_days_json: string | null;
   confirmed_enabled: number | null;
   updated_at: number;
+  pending_entries: string | null;
+  confirmed_entries: string | null;
 }
 
 export class DeviceService {
@@ -143,6 +169,7 @@ export class DeviceService {
       minute: row.pending_minute,
       days: JSON.parse(row.pending_days_json) as number[],
       enabled: row.pending_enabled === 1,
+      ...(row.pending_entries === null ? {} : { entries: JSON.parse(row.pending_entries) as AlarmEntry[] }),
     };
   }
 
@@ -165,6 +192,7 @@ export class DeviceService {
 
     const saved = withTransaction(this.db, () => {
       const existing = this.getAlarmRow();
+      if (existing?.pending_entries != null) throw new Error('Dùng danh sách báo thức để cập nhật cấu hình.');
       const baseRevision = existing
         ? Math.max(existing.pending_revision, existing.confirmed_revision ?? 0)
         : 0;
@@ -212,6 +240,93 @@ export class DeviceService {
     return saved;
   }
 
+  private listAlarms(row = this.getAlarmRow()): AlarmEntry[] {
+    if (!row) return [];
+    const { entries, hour, minute, days, enabled } = this.rowToPending(row);
+    return entries ?? [{
+      id: 'legacy', title: 'Báo thức', hour, minute, days, enabled, date: null,
+      sourceId: null, itemId: null, sourceDue: null, sourceNotifyAt: null, replacesReminder: false,
+    }];
+  }
+
+  private async publishAlarms(config: AlarmConfig, nowSec: number): Promise<void> {
+    const { entries, configId, revision } = config;
+    const payload = entries ? {
+      configId, revision,
+      alarms: entries.filter(entry => entry.enabled).map(entry => ({
+        hour: entry.hour, minute: entry.minute, days: entry.days,
+        date: entry.date ? Number(entry.date.replaceAll('-', '')) : 0,
+        title: toDeviceTitle(entry.title),
+      })),
+    } : config;
+    this.lastAlarmPublishAt = nowSec;
+    await this.mqtt.publish(this.topic('alarms/config'), JSON.stringify(payload), { qos: 1, retain: true });
+  }
+
+  async changeAlarm(
+    id: string | null,
+    input: Record<string, unknown> | null,
+    nowSec: number,
+  ): Promise<void> {
+    const saved = withTransaction(this.db, () => {
+      const row = this.getAlarmRow();
+      const entries = this.listAlarms(row);
+      const index = id === null ? -1 : entries.findIndex(entry => entry.id === id);
+      if (id !== null && index < 0) throw new Error('Không tìm thấy báo thức.');
+      if (input === null) {
+        entries.splice(index, 1);
+      } else {
+        if (id === null && entries.length >= MAX_ALARMS) throw new Error('Đồng hồ lưu tối đa 12 báo thức.');
+        const title = typeof input['title'] === 'string' ? input['title'].trim() : '';
+        if (!title || title.length > 80) throw new Error('Tên báo thức phải có từ 1 đến 80 ký tự.');
+        const date = input['date'] ?? null;
+        if (date !== null && (typeof date !== 'string' || !/^20\d{2}-\d{2}-\d{2}$/.test(date)
+          || new Date(Date.parse(date) || 0).toISOString().slice(0, 10) !== date)) {
+          throw new Error('Ngày báo thức không hợp lệ.');
+        }
+        const { hour, minute, enabled } = input as unknown as AlarmInput;
+        const days = validateAlarmInput({ hour, minute, enabled: date ? false : enabled, days: date ? [] : input['days'] as number[] });
+        if (typeof enabled !== 'boolean') throw new Error('Trạng thái bật/tắt không hợp lệ.');
+        if (enabled && date && `${date} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+          <= formatLocalDateTime(nowSec, 'Asia/Ho_Chi_Minh')) {
+          throw new Error('Chọn ngày và giờ trong tương lai.');
+        }
+        const old = entries[index];
+        const sourceId = old?.sourceId ?? (typeof input['sourceId'] === 'string' ? input['sourceId'] : null);
+        const itemId = old?.itemId ?? (typeof input['itemId'] === 'string' ? input['itemId'] : null);
+        const sourceItem = sourceId && itemId ? this.db.prepare(
+          'SELECT date_only, notify_at FROM source_items WHERE source_id = ? AND external_id = ?',
+        ).get(sourceId, itemId) as { date_only: string | null; notify_at: number | null } | undefined : undefined;
+        if ((sourceId || itemId) && !sourceItem && !old) throw new Error('Công việc không còn trong nguồn đã đồng bộ.');
+        const updateSource = !old || input['updateSource'] === true;
+        const sourceNotifyAt = updateSource ? sourceItem?.notify_at ?? null : old.sourceNotifyAt;
+        const sourceDue = updateSource
+          ? sourceItem?.date_only ?? (sourceNotifyAt === null ? null : String(sourceNotifyAt))
+          : old.sourceDue;
+        const saved: AlarmEntry = {
+          id: id ?? crypto.randomUUID(), title, date, hour, minute, enabled, days, sourceId, itemId,
+          sourceDue, sourceNotifyAt,
+          replacesReminder: Boolean(date && sourceNotifyAt !== null && input['replacesReminder'] === true),
+        };
+        const conflict = entries.find((entry, position) => position !== index && overlaps(saved, entry));
+        if (conflict) throw new Error(`Giờ reo trùng với “${conflict.title}”. Hãy chọn một giờ khác.`);
+        if (index < 0) entries.push(saved);
+        else entries[index] = saved;
+      }
+      const configId = crypto.randomUUID();
+      const revision = Math.max(row?.pending_revision ?? 0, row?.confirmed_revision ?? 0) + 1;
+      this.db.prepare(
+        `INSERT INTO alarm_config (id, pending_config_id, pending_revision, pending_hour, pending_minute,
+          pending_days_json, pending_enabled, pending_entries, updated_at) VALUES (1, ?, ?, 0, 0, '[]', 0, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET pending_config_id = excluded.pending_config_id,
+            pending_revision = excluded.pending_revision, pending_entries = excluded.pending_entries, updated_at = excluded.updated_at`,
+      ).run(configId, revision, JSON.stringify(entries), nowSec);
+      return this.rowToPending(this.getAlarmRow()!);
+    });
+    // The saved revision remains queued if the broker is temporarily unavailable.
+    await this.publishAlarms(saved, nowSec).catch(() => {});
+  }
+
   queueNotification(
     input: NotificationInput,
     nowSec: number = Math.floor(Date.now() / 1000),
@@ -252,11 +367,7 @@ export class DeviceService {
       (this.lastAlarmPublishAt === null || nowSec - this.lastAlarmPublishAt >= RETRY_INTERVAL_SEC)
     ) {
       const pending = this.rowToPending(alarmRow);
-      await this.mqtt.publish(this.topic('alarms/config'), JSON.stringify(pending), {
-        qos: 1,
-        retain: true,
-      });
-      this.lastAlarmPublishAt = nowSec;
+      await this.publishAlarms(pending, nowSec);
     }
 
     const dueRows = this.db
@@ -267,6 +378,12 @@ export class DeviceService {
            AND notify_at <= ?
            AND expires_at > ?
            AND (last_sent_at IS NULL OR (? - last_sent_at) >= ?)
+           AND NOT EXISTS (
+             SELECT 1 FROM active_alarm_replacements AS alarm
+             WHERE alarm.source_id = notification_queue.source_id
+               AND alarm.external_id = notification_queue.external_id
+               AND alarm.notify_at = notification_queue.notify_at
+           )
          ORDER BY notify_at ASC`,
       )
       .all(nowSec, nowSec, nowSec, RETRY_INTERVAL_SEC) as Array<{
@@ -301,11 +418,7 @@ export class DeviceService {
     const alarmRow = this.getAlarmRow();
     if (alarmRow && !this.isAlarmSynced(alarmRow)) {
       const pending = this.rowToPending(alarmRow);
-      await this.mqtt.publish(this.topic('alarms/config'), JSON.stringify(pending), {
-        qos: 1,
-        retain: true,
-      });
-      this.lastAlarmPublishAt = nowSec;
+      await this.publishAlarms(pending, nowSec);
     }
   }
 
@@ -402,7 +515,8 @@ export class DeviceService {
               confirmed_hour = pending_hour,
               confirmed_minute = pending_minute,
               confirmed_days_json = pending_days_json,
-              confirmed_enabled = pending_enabled
+              confirmed_enabled = pending_enabled,
+              confirmed_entries = pending_entries
             WHERE id = 1`,
           )
           .run();
@@ -442,22 +556,11 @@ export class DeviceService {
           )
           .run(nextRevision, appliedRevision as number, nowSec);
 
-        return {
-          configId: row.pending_config_id,
-          revision: nextRevision,
-          hour: row.pending_hour,
-          minute: row.pending_minute,
-          days: JSON.parse(row.pending_days_json) as number[],
-          enabled: row.pending_enabled === 1,
-        };
+        return { ...this.rowToPending(row), revision: nextRevision };
       });
 
       if (republished) {
-        await this.mqtt.publish(this.topic('alarms/config'), JSON.stringify(republished), {
-          qos: 1,
-          retain: true,
-        });
-        this.lastAlarmPublishAt = nowSec;
+        await this.publishAlarms(republished, nowSec);
       }
     }
   }
@@ -476,6 +579,7 @@ export class DeviceService {
         syncState: 'unconfigured',
         pendingAlarm: null,
         confirmedAlarm: null,
+        alarms: [],
       };
     }
 
@@ -505,6 +609,7 @@ export class DeviceService {
       syncState: synced ? 'synced' : 'pending',
       pendingAlarm,
       confirmedAlarm,
+      alarms: this.listAlarms(alarmRow),
     };
   }
 }

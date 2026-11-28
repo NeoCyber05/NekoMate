@@ -35,6 +35,52 @@ test('toDeviceTitle strips Vietnamese diacritics, đ/Đ, emoji and limits to 48 
   assert.ok(normalized.endsWith('...'));
 });
 
+test('multiple alarms preserve the legacy schedule and replace only the acknowledged source occurrence', async () => {
+  const db = openDatabase(':memory:');
+  const mqtt = new FakeMqttTransport();
+  const svc = new DeviceService({ db, deviceId: 'nekomate-01', mqtt });
+  const now = Date.parse('2026-11-23T08:00:00+07:00') / 1000;
+  const notifyAt = now + 3000;
+  try {
+    await svc.saveAlarm({ hour: 7, minute: 0, days: [1, 2, 3], enabled: true }, now);
+    db.prepare('INSERT INTO source_items VALUES (?, ?, ?, ?, ?, ?)').run('google_calendar', 'event', 'Họp nhóm', null, notifyAt, now);
+    svc.queueNotification({
+      notificationId: 'n1', source: 'Google Calendar', sourceId: 'google_calendar', externalId: 'event',
+      title: 'Họp nhóm', notifyAt, expiresAt: notifyAt + 300,
+    }, now);
+    await svc.changeAlarm(null, {
+      title: 'Họp nhóm', date: '2026-11-23', hour: 9, minute: 0, enabled: true,
+      sourceId: 'google_calendar', itemId: 'event', replacesReminder: true,
+    }, now);
+    const eventAlarm = svc.getDeviceStatus().alarms[1]!;
+    await assert.rejects(svc.changeAlarm(null, {
+      title: 'Trùng giờ', date: '2026-11-24', hour: 7, minute: 0, enabled: true,
+    }, now), /trùng với/);
+    const config = mqtt.published.at(-1)!.payload;
+    assert.deepEqual(config['alarms'], [
+      { hour: 7, minute: 0, days: [1, 2, 3], date: 0, title: 'Bao thuc' },
+      { hour: 9, minute: 0, days: [], date: 20261123, title: 'Hop nhom' },
+    ]);
+    assert.equal(db.prepare('SELECT * FROM active_alarm_replacements').all().length, 0);
+    await svc.handleMqttMessage(svc.topic('events'), JSON.stringify({
+      type: 'alarm_config_applied', configId: config['configId'], revision: config['revision'],
+    }), now);
+    assert.equal(svc.getDeviceStatus().syncState, 'synced');
+    await svc.tickDevice(notifyAt);
+    assert.equal(mqtt.published.filter(message => message.topic === svc.topic('notify')).length, 0);
+    await svc.changeAlarm(eventAlarm.id, null, notifyAt);
+    const updated = mqtt.published.at(-1)!.payload;
+    await svc.handleMqttMessage(svc.topic('events'), JSON.stringify({
+      type: 'alarm_config_applied', configId: updated['configId'], revision: updated['revision'],
+    }), notifyAt);
+    await svc.tickDevice(notifyAt + 1);
+    assert.equal(mqtt.published.filter(message => message.topic === svc.topic('notify')).length, 1);
+    assert.equal(svc.getDeviceStatus().alarms[0]?.id, 'legacy');
+  } finally {
+    db.close();
+  }
+});
+
 test('retries notification every 15s, stops on shown, and marks missed after expiresAt', async () => {
   const db = openDatabase(':memory:');
   const mqtt = new FakeMqttTransport();

@@ -98,6 +98,12 @@ test('HTTP endpoints enforce guest auth, Chờ đồng bộ -> synced lifecycle,
     });
     assert.equal(loginRes.status, 200);
     const cookie = (loginRes.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+    const itemsRes = await fetch(`${baseUrl}/api/sources/google_tasks/items`, { headers: { Cookie: cookie } });
+    assert.equal(itemsRes.status, 200);
+    const { items } = await itemsRes.json() as { items: Array<{ id: string; title: string; dateOnly: string }> };
+    assert.deepEqual(items.map(({ id, title, dateOnly }) => ({ id, title, dateOnly })), [
+      { id: 'gt-date', title: 'Nộp thuế năm', dateOnly: '2026-11-24' },
+    ]);
 
     // 3. Đặt báo thức -> trạng thái chờ đồng bộ cho tới khi nhận đúng configId & revision
     const putRes = await fetch(`${baseUrl}/api/alarm`, {

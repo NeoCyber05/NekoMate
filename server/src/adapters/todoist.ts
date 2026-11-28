@@ -59,6 +59,7 @@ export const todoistAdapter: SourceAdapter = {
 
         const due = task['due'] as Record<string, unknown> | undefined;
         if (!due || typeof due !== 'object') {
+          items.push({ externalId: id, title, dateOnly: null, notifyAt: null });
           continue;
         }
 

@@ -99,14 +99,7 @@ export const googleTasksAdapter: SourceAdapter = {
           : 'Việc Google Tasks';
         const dateOnly = extractDateOnly(task['due']);
         // Google Tasks API chỉ lưu phần ngày (thường trả về T00:00:00.000Z), không đặt giờ nhắc MQTT
-        if (dateOnly) {
-          items.push({
-            externalId: id,
-            title,
-            dateOnly,
-            notifyAt: null,
-          });
-        }
+        items.push({ externalId: id, title, dateOnly, notifyAt: null });
       }
 
       pageToken = typeof payload['nextPageToken'] === 'string' && payload['nextPageToken']

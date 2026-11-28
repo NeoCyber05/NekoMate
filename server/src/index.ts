@@ -127,6 +127,26 @@ export function createApp(deps: AppDependencies): express.Express {
     }
   });
 
+  app.post('/api/alarms', checkOrigin, requireAuth, async (req, res) => {
+    try {
+      await deps.deviceService.changeAlarm(null, req.body ?? {}, nowSec());
+      res.status(201).json({ device: deps.deviceService.getDeviceStatus() });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Báo thức không hợp lệ' });
+    }
+  });
+
+  const changeAlarm = async (req: Request<{ id: string }>, res: Response) => {
+    try {
+      await deps.deviceService.changeAlarm(req.params.id, req.method === 'DELETE' ? null : req.body ?? {}, nowSec());
+      res.json({ device: deps.deviceService.getDeviceStatus() });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Báo thức không hợp lệ' });
+    }
+  };
+  app.put('/api/alarms/:id', checkOrigin, requireAuth, changeAlarm);
+  app.delete('/api/alarms/:id', checkOrigin, requireAuth, changeAlarm);
+
   app.post('/api/notifications/test', checkOrigin, requireAuth, async (req: Request, res: Response) => {
     const rawTitle = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
     const title = rawTitle || 'Kiểm tra NekoMate';
@@ -157,9 +177,15 @@ export function createApp(deps: AppDependencies): express.Express {
 
     const timedRows = deps.db
       .prepare(
-        `SELECT notification_id, source, source_id, title, notify_at, expires_at, status
+        `SELECT notification_id, source, source_id, title, notify_at, expires_at,
+           CASE WHEN status IN ('pending', 'missed') AND EXISTS (
+             SELECT 1 FROM active_alarm_replacements AS alarm
+             WHERE alarm.source_id = notification_queue.source_id
+               AND alarm.external_id = notification_queue.external_id
+               AND alarm.notify_at = notification_queue.notify_at
+           ) THEN 'replaced' ELSE status END AS status
          FROM notification_queue
-         WHERE status != 'cancelled'
+         WHERE notification_queue.status != 'cancelled'
          ORDER BY notify_at ASC`,
       )
       .all() as Array<{
@@ -216,6 +242,30 @@ export function createApp(deps: AppDependencies): express.Express {
 
   if (deps.sourcesService) {
     const sourcesSvc = deps.sourcesService;
+
+    app.get('/api/sources/:id/items', requireAuth, (req, res) => {
+      const source = sourcesSvc.listSources().find(item => item.id === req.params.id);
+      if (!source || source.status === 'disconnected') {
+        res.status(404).json({ error: 'Nguồn chưa được kết nối.' });
+        return;
+      }
+      const rows = deps.db.prepare(
+        `SELECT external_id, title, date_only, notify_at FROM source_items
+         WHERE source_id = ? ORDER BY COALESCE(date_only, date(notify_at, 'unixepoch', '+7 hours')), notify_at, title`,
+      ).all(source.id) as Array<{ external_id: string; title: string; date_only: string | null; notify_at: number | null }>;
+      const items = rows.map(row => {
+        const notifyAt = row.notify_at;
+        const localTime = notifyAt === null ? null : formatLocalDateTime(
+          notifyAt + (source.kind === 'calendar' ? 600 : 0), 'Asia/Ho_Chi_Minh',
+        );
+        return {
+          id: row.external_id, title: row.title, dateOnly: row.date_only, localTime,
+          sourceDue: row.date_only ?? (notifyAt === null ? null : String(notifyAt)),
+          reminderTime: notifyAt === null ? null : formatLocalDateTime(notifyAt, 'Asia/Ho_Chi_Minh'),
+        };
+      });
+      res.json({ items });
+    });
 
     app.get('/api/sources', requireAuth, (_req: Request, res: Response) => {
       res.json({ sources: sourcesSvc.listSources() });

@@ -1,6 +1,7 @@
-import { useRef, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
-import { Brand, ClockStage, Icon, daysLabel, formatAlarm, useDeskTime } from './device-visual.jsx';
+import { Brand, ClockStage, Icon, useDeskTime } from './device-visual.jsx';
+import { Modal } from './alarms.jsx';
 
 export function Login({ login, checking }) {
   const [password, setPassword] = useState('');
@@ -61,73 +62,7 @@ export function Login({ login, checking }) {
   );
 }
 
-const weekdays = ['Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy', 'Chủ nhật'];
-
-export function Alarm({ alarm, device, deviceError, edit, save }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [daysError, setDaysError] = useState(false);
-  const confirmed = device?.confirmedAlarm;
-  const confirmedTime = formatAlarm(confirmed);
-  const sync = device?.syncState === 'pending' ? 'Đang chờ đồng bộ' : device?.syncState === 'synced' ? 'Đã đồng bộ' : 'Chưa đồng bộ';
-
-  async function submit(event) {
-    event.preventDefault();
-    if (alarm.enabled && !alarm.days.length) {
-      setDaysError(true);
-      event.currentTarget.querySelector('.day-choice input').focus();
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try { await save(); } catch (err) { setError(err.message); } finally { setBusy(false); }
-  }
-
-  function toggleDay(day, checked) {
-    const days = checked ? [...alarm.days, day].sort((a, b) => a - b) : alarm.days.filter((value) => value !== day);
-    edit({ ...alarm, days });
-    if (days.length) setDaysError(false);
-  }
-
-  return <div class="panel-grid">
-    <section class="panel alarm-panel" aria-labelledby="alarm-title">
-      <div class="panel-heading"><span class="tile-icon tile-icon--alarm"><Icon name="alarm" /></span><h2 id="alarm-title">Cài đặt giờ reo</h2></div>
-      <form class="alarm-form" onSubmit={submit}>
-        <div class="field"><label for="alarm-time">Giờ báo thức <span class="muted">· giờ Việt Nam</span></label>
-          <input id="alarm-time" class="time-input" type="time" required value={alarm.time}
-            onInput={(event) => edit({ ...alarm, time: event.currentTarget.value })} />
-        </div>
-        <fieldset aria-describedby={daysError ? 'alarm-days-error' : undefined}>
-          <legend>Ngày lặp lại</legend>
-          <div class="day-grid">
-            {weekdays.map((label, index) => <label class="day-choice" key={label}>
-              <input type="checkbox" checked={alarm.days.includes(index + 1)} aria-label={label}
-                onChange={(event) => toggleDay(index + 1, event.currentTarget.checked)} />
-              <span aria-hidden="true">{index === 6 ? 'CN' : `T${index + 2}`}</span>
-            </label>)}
-          </div>
-          {daysError && <p id="alarm-days-error" class="error" role="alert">Chọn ít nhất một ngày khi bật báo thức.</p>}
-        </fieldset>
-        <label class="switch-row">
-          <input type="checkbox" role="switch" checked={alarm.enabled}
-            onChange={(event) => { edit({ ...alarm, enabled: event.currentTarget.checked }); setDaysError(false); }} />
-          <span class="switch-track" aria-hidden="true" />
-          <span>Bật báo thức</span>
-        </label>
-        {error && <p class="error" role="alert">{error}</p>}
-        <button class="btn btn--primary" type="submit" disabled={busy || !device}>{busy ? 'Đang lưu…' : 'Lưu báo thức'}</button>
-      </form>
-    </section>
-    <section class="panel alarm-status" aria-labelledby="alarm-device-title">
-      <div class="panel-heading"><span class="tile-icon tile-icon--sources"><Icon name="device" /></span><h2 id="alarm-device-title">Báo thức trên đồng hồ</h2></div>
-      <strong class="confirmed-time">{confirmedTime || '—:—'}</strong>
-      <p>{deviceError || (confirmedTime ? `${confirmed.enabled ? 'Đang bật' : 'Đang tắt'} · ${daysLabel(confirmed.days)}` : 'Chưa có giờ báo thức được đồng hồ xác nhận.')}</p>
-      {device && !deviceError && <span class={`status-tag ${device.syncState === 'synced' ? 'status-tag--ok' : ''}`}>{sync}</span>}
-    </section>
-  </div>;
-}
-
-const reminderLabels = { pending: 'Chờ nhắc', shown: 'Đã hiện', dismissed: 'Đã chạm tắt', missed: 'Quá hạn', date_only: 'Theo ngày' };
+const reminderLabels = { pending: 'Chờ nhắc', shown: 'Đã hiện', dismissed: 'Đã chạm tắt', missed: 'Quá hạn', date_only: 'Theo ngày', replaced: 'Đã chuyển thành báo thức' };
 
 function Refresh({ onClick, busy }) {
   return <button type="button" class="btn btn--secondary" onClick={onClick} disabled={busy}>
@@ -185,7 +120,7 @@ const sourceStatus = { connected: 'Đã kết nối', error: 'Lỗi đồng bộ
 const sourceIcons = { google_calendar: 'google-calendar', google_tasks: 'google-tasks', todoist: 'todoist', ticktick: 'ticktick' };
 const dateTime = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', dateStyle: 'short', timeStyle: 'short' });
 
-function Source({ source, api, sources, reminders, announce }) {
+function Source({ source, api, sources, reminders, announce, onBrowse }) {
   const [busy, setBusy] = useState('');
   const [options, setOptions] = useState(null);
   const [selection, setSelection] = useState('');
@@ -242,25 +177,71 @@ function Source({ source, api, sources, reminders, announce }) {
     </div>}
     {error && <p class="error" role="alert">{error}</p>}
     <div class="source-actions source-actions--main">
+      {source.status !== 'disconnected' && <button type="button" class="btn btn--primary source-browse"
+        onClick={() => onBrowse(source)}><Icon name={source.kind === 'calendar' ? 'reminders' : 'tasks'} />
+        {source.kind === 'calendar' ? 'Xem sự kiện' : 'Xem công việc'}</button>}
       <button type="button" class="btn btn--secondary" disabled={Boolean(busy)} onClick={() => perform('connect')}>
         {busy === 'connect' ? 'Đang kết nối…' : source.status === 'disconnected' ? 'Kết nối' : 'Kết nối lại'}
       </button>
-      {source.status !== 'disconnected' && <button type="button" class="btn btn--primary" disabled={Boolean(busy)} onClick={() => perform('sync')}>
+      {source.status !== 'disconnected' && <button type="button" class="btn btn--secondary" disabled={Boolean(busy)} onClick={() => perform('sync')}>
         {busy === 'sync' ? 'Đang đồng bộ…' : 'Đồng bộ ngay'}
       </button>}
     </div>
   </article>;
 }
 
-export function Sources({ sources, reminders, api, announce }) {
+function SourceItems({ source, api, onClose, onChoose, alarms }) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    api(`/sources/${encodeURIComponent(source.id)}/items`, { signal: controller.signal })
+      .then(result => setItems(result.items))
+      .catch(err => { if (!controller.signal.aborted) setError(err.message); });
+    return () => controller.abort();
+  }, []);
+  const visible = items?.filter(item => item.title.toLocaleLowerCase('vi').includes(query.trim().toLocaleLowerCase('vi')));
+  return <Modal heading={source.name} detail={source.scopeLabel || (source.kind === 'calendar' ? 'Sự kiện đã đồng bộ' : 'Công việc đã đồng bộ')}
+    onClose={onClose} wide>
+    <div class="source-items-body">
+      {items?.length > 0 && <div class="field"><label class="sr-only" for="source-search">Tìm theo tên</label>
+        <input id="source-search" type="search" placeholder={source.kind === 'calendar' ? 'Tìm sự kiện…' : 'Tìm công việc…'} value={query}
+          onInput={event => setQuery(event.currentTarget.value)} /></div>}
+      {error && <p class="error" role="alert">{error}</p>}
+      {!items && !error && <p class="empty" role="status">Đang tải dữ liệu…</p>}
+      {visible?.length === 0 && <p class="empty">{items.length ? 'Không tìm thấy mục phù hợp.'
+        : source.requiresScope && !source.scopeId ? 'Chọn danh sách hoặc dự án trong trang App kết nối.' : 'App này chưa có mục nào được đồng bộ.'}</p>}
+      {!!visible?.length && <ul class="source-item-list">{visible.map(item => {
+        const existing = alarms.find(alarm => alarm.sourceId === source.id && alarm.itemId === item.id);
+        const changed = existing && existing.sourceDue !== item.sourceDue;
+        const [date, time] = (item.localTime || item.dateOnly || '').split(' ');
+        return <li key={item.id}>
+          <span class="tile-icon tile-icon--reminders"><Icon name={source.kind === 'calendar' ? 'reminders' : 'tasks'} /></span>
+          <div class="source-item-text"><strong>{item.title}</strong>
+            <p>{date ? [time, date.split('-').reverse().join('/')].filter(Boolean).join(' · ') : 'Chưa có ngày giờ'}
+              {changed ? ' · Hạn ở nguồn đã đổi' : existing ? ' · Đã đặt báo thức' : ''}</p>
+          </div>
+          <button type="button" class={`btn ${existing ? 'btn--secondary' : 'btn--source'}`}
+            onClick={() => onChoose(source, item, existing)}><Icon name="alarm" />{existing ? 'Sửa báo thức' : 'Đặt báo thức'}</button>
+        </li>;
+      })}</ul>}
+    </div>
+  </Modal>;
+}
+
+export function Sources({ sources, reminders, api, announce, onChoose, alarms }) {
+  const [selected, select] = useState(null);
   return <section class="sources" aria-labelledby="sources-title">
     <div class="sources-toolbar"><h2 id="sources-title">Lịch và danh sách công việc</h2><Refresh onClick={sources.load} busy={sources.loading} /></div>
     {sources.error && <p class="error" role="alert">{sources.error}</p>}
-    {sources.loading && !sources.data && <p class="empty">Đang tải nguồn lịch…</p>}
-    {sources.data?.length === 0 && <p class="empty">Chưa có nguồn lịch nào để liên kết.</p>}
+    {sources.loading && !sources.data && <p class="empty">Đang tải danh sách app…</p>}
+    {sources.data?.length === 0 && <p class="empty">Chưa có app nào để liên kết.</p>}
     <div class="source-grid">
-      {sources.data?.map((source) => <Source key={source.id} source={source} api={api} sources={sources} reminders={reminders} announce={announce} />)}
+      {sources.data?.map((source) => <Source key={source.id} source={source} api={api} sources={sources} reminders={reminders} announce={announce} onBrowse={select} />)}
     </div>
+    {selected && <SourceItems source={selected} api={api} alarms={alarms} onClose={() => select(null)}
+      onChoose={(source, item, existing) => { select(null); onChoose(source, item, existing); }} />}
     {sources.data?.some((source) => sourceIcons[source.id]) && <footer class="source-credit">Tên và biểu trưng thuộc về các nhà cung cấp tương ứng.</footer>}
   </section>;
 }

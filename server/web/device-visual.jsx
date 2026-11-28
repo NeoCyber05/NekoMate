@@ -4,10 +4,10 @@ import mountSpotlight from '/assets/moments/cursor-spotlight/moment.js';
 import { coarse, reduced } from '/assets/moments/lib.js';
 
 const icons = {
+  plus: 'M12 5v14M5 12h14',
+  close: 'm6 6 12 12M18 6 6 18',
+  tasks: 'M5 6h2m3 0h9M5 12h2m3 0h9M5 18h2m3 0h9',
   overview: 'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z',
-  alarm: 'M5 3 2 6m17-3 3 3M7 19l-2 2m12-2 2 2M12 8v5l3 2m5-2a8 8 0 1 1-16 0 8 8 0 0 1 16 0z',
-  reminders: 'M4 10h16M8 3v4m8-4v4M6 5h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm2 9h3m-3 3h6',
-  sources: 'M10 13a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-2 2m2 6a4 4 0 0 0-6 0l-4 4a4 4 0 0 0 6 6l2-2',
   arrow: 'M4 12h15m-6-6 6 6-6 6',
   exit: 'M10 17l5-5-5-5m5 5H3m11-8h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5',
   refresh: 'M20 4v5h-5m5-.5A8 8 0 0 0 6 6m-2 14v-5h5m-5 .5A8 8 0 0 0 18 18',
@@ -18,7 +18,36 @@ const icons = {
   lock: 'M7 10V7a5 5 0 0 1 10 0v3M5 10h14v11H5zm7 5v2',
 };
 
+const featureIcons = {
+  alarm: (
+    <>
+      <circle class="feature-icon-fill" cx="12" cy="12.75" r="7" />
+      <path d="M2.9 6.5A5.9 5.9 0 0 1 6.8 3.3m10.4 0a5.9 5.9 0 0 1 3.9 3.2M7.3 18l-1.9 2.2m11.3-2.2 1.9 2.2" />
+      <circle cx="12" cy="12.75" r="7" />
+      <path class="feature-icon-detail" d="M12 9.45v3.55l2.45 1.5" />
+    </>
+  ),
+  reminders: (
+    <>
+      <path class="feature-icon-fill" d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v2.1H4Z" />
+      <rect x="4" y="5" width="16" height="15.5" rx="2.5" />
+      <path d="M8 3.5v3m8-3v3M4 9.6h16" />
+      <path class="feature-icon-detail" d="m8.8 14.75 2.1 2.05 4.4-4.5" />
+    </>
+  ),
+  sources: (
+    <g transform="rotate(40 12 12)">
+      <path class="feature-icon-fill" d="M7 8.5h10v3.8a5 5 0 0 1-10 0Z" />
+      <path d="M7 8.5h10v3.8a5 5 0 0 1-10 0Zm-1.3 0h12.6M12 17.3v4.3" />
+      <path class="feature-icon-detail" d="M9.3 3.6v4.9m5.4-4.9v4.9" />
+    </g>
+  ),
+};
+
 export function Icon({ name }) {
+  if (Object.hasOwn(featureIcons, name)) {
+    return <svg class="icon feature-icon" viewBox="0 0 24 24" aria-hidden="true">{featureIcons[name]}</svg>;
+  }
   return <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d={icons[name]} /></svg>;
 }
 

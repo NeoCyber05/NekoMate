@@ -1,24 +1,24 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 
-import { Brand, ClockStage, Icon, daysLabel, formatAlarm, useDeskTime } from './device-visual.jsx';
-import { Alarm, Login, Reminders, Sources } from './panels.jsx';
+import { Brand, ClockStage, Icon, formatAlarm, useDeskTime } from './device-visual.jsx';
+import { Alarms, alarmFromItem, nextAlarm } from './alarms.jsx';
+import { Login, Reminders, Sources } from './panels.jsx';
 import './style.css';
 
 const screens = {
   overview: 'Tổng quan',
   alarm: 'Báo thức',
   reminders: 'Lời nhắc',
-  sources: 'Nguồn lịch',
+  sources: 'App kết nối',
 };
 
 const screenDescriptions = {
-  alarm: 'Đặt giờ reo và chọn ngày lặp trên đồng hồ.',
+  alarm: 'Quản lý các mốc reo trên đồng hồ NekoMate.',
   reminders: 'Gửi lời nhắc ngay hoặc xem các lời nhắc đã lên lịch.',
-  sources: 'Liên kết lịch và danh sách công việc để nhận lời nhắc trên đồng hồ.',
+  sources: 'Mở lịch và công việc đã đồng bộ để đặt báo thức.',
 };
 
-const initialAlarm = { time: '07:00', days: [1, 2, 3, 4, 5], enabled: true };
 const pollInterval = 3000;
 
 function readScreen() {
@@ -70,16 +70,16 @@ function Nav({ screen, device, deviceError, onLogout, loggingOut }) {
 }
 
 function Overview({ device, deviceError, reminders, sources, deskTime }) {
-  const alarm = device?.confirmedAlarm;
+  const alarm = nextAlarm(device?.alarms);
   const alarmTime = formatAlarm(alarm);
   const linked = sources.data?.filter((item) => item.status === 'connected').length;
   const next = reminders.data?.find((item) => item.status === 'pending' || item.status === 'date_only');
   const stats = [
-    ['alarm', 'Báo thức đã lưu trên mèo', alarmTime || '—',
-      deviceError || (device?.syncState === 'pending' ? 'Đang chờ đồng bộ' : alarmTime ? `${alarm.enabled ? 'Đang bật' : 'Đang tắt'} · ${daysLabel(alarm.days)}` : device ? 'Chưa có xác nhận từ đồng hồ' : 'Đang tải…')],
+    ['alarm', 'Báo thức kế tiếp', alarmTime || '—',
+      deviceError || (device?.syncState === 'pending' ? 'Chờ đồng hồ xác nhận' : alarm?.title || (device ? 'Chưa có báo thức sắp reo' : 'Đang tải…'))],
     ['reminders', 'Lời nhắc trong 7 ngày', reminders.data?.length ?? '—',
       reminders.error || (reminders.data ? next?.title || 'Chưa có lời nhắc đang chờ' : 'Đang tải…')],
-    ['sources', 'Nguồn đã kết nối', sources.data ? `${linked}/${sources.data.length}` : '—',
+    ['sources', 'App kết nối', sources.data ? `${linked}/${sources.data.length}` : '—',
       sources.error || (sources.data ? 'Lịch và danh sách công việc' : 'Đang tải…')],
   ];
 
@@ -98,7 +98,7 @@ function Overview({ device, deviceError, reminders, sources, deskTime }) {
         <ClockStage online={device?.online && !deviceError} time={deskTime.time} />
       </section>
       <section class="summary" aria-labelledby="summary-title">
-        <h2 id="summary-title">Báo thức, lời nhắc và nguồn lịch</h2>
+        <h2 id="summary-title">Báo thức, lời nhắc và app kết nối</h2>
         <div class="summary-grid">
           {stats.map(([id, title, value, detail]) => (
             <a key={id} href={`#${id}`} class="summary-card card">
@@ -140,9 +140,9 @@ function Dashboard({ api, logout, loggingOut, announce }) {
   const [screen, setScreen] = useState(readScreen);
   const [device, setDevice] = useState(null);
   const [deviceError, setDeviceError] = useState('');
-  const [alarm, setAlarm] = useState(initialAlarm);
-  const alarmEdited = useRef(false);
+  const [alarmDraft, setAlarmDraft] = useState(null);
   const deviceVersion = useRef(0);
+  const syncedRevision = useRef(null);
   const reminders = useCollection('/reminders', 'reminders', api);
   const sources = useCollection('/sources', 'sources', api);
   const deskTime = useDeskTime();
@@ -161,16 +161,16 @@ function Dashboard({ api, logout, loggingOut, announce }) {
     const controller = new AbortController();
     let poll;
 
-    async function refreshDevice(initial = false) {
+    async function refreshDevice() {
       const id = deviceVersion.current;
       try {
         const data = await api('/device', { signal: controller.signal });
         if (controller.signal.aborted || id !== deviceVersion.current) return;
         setDevice(data);
         setDeviceError('');
-        const pending = data.pendingAlarm;
-        if (initial && !alarmEdited.current && formatAlarm(pending)) {
-          setAlarm({ time: formatAlarm(pending), days: pending.days, enabled: pending.enabled });
+        if (data.syncState === 'synced' && data.pendingAlarm && data.pendingAlarm.configId !== syncedRevision.current) {
+          syncedRevision.current = data.pendingAlarm.configId;
+          void reminders.load();
         }
       } catch (err) {
         if (!controller.signal.aborted && id === deviceVersion.current) setDeviceError(err.message);
@@ -186,7 +186,7 @@ function Dashboard({ api, logout, loggingOut, announce }) {
 
     const onVisibility = () => updatePolling(true);
     document.addEventListener('visibilitychange', onVisibility);
-    void refreshDevice(true);
+    void refreshDevice();
     void reminders.load();
     void sources.load();
     updatePolling();
@@ -197,18 +197,23 @@ function Dashboard({ api, logout, loggingOut, announce }) {
     };
   }, []);
 
-  function editAlarm(next) {
-    alarmEdited.current = true;
-    setAlarm(next);
-  }
-
-  async function saveAlarm() {
-    const [hour, minute] = alarm.time.split(':').map(Number);
-    const { device: updated } = await api('/alarm', { method: 'PUT', body: { hour, minute, days: alarm.days, enabled: alarm.enabled } });
+  async function changeAlarm(id, body) {
+    deviceVersion.current += 1;
+    const path = id ? `/alarms/${encodeURIComponent(id)}` : '/alarms';
+    const { device: updated } = await api(path, { method: !id ? 'POST' : body === null ? 'DELETE' : 'PUT', body: body ?? undefined });
     deviceVersion.current += 1;
     setDevice(updated);
     setDeviceError('');
-    announce('Đã lưu báo thức. Xem trạng thái đồng bộ với đồng hồ.');
+    if (updated.syncState === 'synced') {
+      syncedRevision.current = updated.pendingAlarm?.configId ?? null;
+      void reminders.load();
+    }
+    announce(body === null ? 'Đã xóa báo thức.' : 'Đã lưu báo thức.');
+  }
+
+  function chooseSourceItem(source, item, existing) {
+    setAlarmDraft(existing ? { ...existing, time: formatAlarm(existing), sourceName: source.name } : alarmFromItem(source, item));
+    window.location.hash = 'alarm';
   }
 
   return (
@@ -220,9 +225,11 @@ function Dashboard({ api, logout, loggingOut, announce }) {
           <span class="page-date"><Icon name="reminders" />{deskTime.date}</span>
         </header>
         {screen === 'overview' && <Overview device={device} deviceError={deviceError} reminders={reminders} sources={sources} deskTime={deskTime} />}
-        {screen === 'alarm' && <Alarm alarm={alarm} device={device} deviceError={deviceError} edit={editAlarm} save={saveAlarm} />}
+        {screen === 'alarm' && <Alarms device={device} deviceError={deviceError} draft={alarmDraft} setDraft={setAlarmDraft}
+          change={changeAlarm} api={api} sources={sources} />}
         {screen === 'reminders' && <Reminders reminders={reminders} api={api} announce={announce} />}
-        {screen === 'sources' && <Sources sources={sources} reminders={reminders} api={api} announce={announce} />}
+        {screen === 'sources' && <Sources sources={sources} reminders={reminders} api={api} announce={announce}
+          alarms={device?.alarms ?? []} onChoose={chooseSourceItem} />}
       </main>
     </div>
   );
